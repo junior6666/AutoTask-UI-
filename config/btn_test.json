@@ -1,0 +1,35 @@
+{
+    "name": "\u65b0\u4efb\u52a1 3",
+    "schedule": {
+        "enable": "\u7acb\u5373\u6267\u884c",
+        "time": "21:18:39",
+        "interval": 10,
+        "repeat": "1"
+    },
+    "steps": [
+        {
+            "type": "\u9f20\u6807\u70b9\u51fb",
+            "params": {
+                "image_path": "C:/Users/pc/Desktop/img/wechat_2025-08-23_200241_968.png",
+                "click_type": "\u5de6\u952e\u5355\u51fb",
+                "offset_x": 0,
+                "offset_y": 0,
+                "confidence": 0.8,
+                "timeout": 10
+            },
+            "delay": 0
+        },
+        {
+            "type": "\u9f20\u6807\u70b9\u51fb",
+            "params": {
+                "image_path": "H:\\pycharm_project\\AutoTask-UI-\\img\\20250823_212622.png",
+                "click_type": "\u5de6\u952e\u5355\u51fb",
+                "offset_x": 0,
+                "offset_y": 0,
+                "confidence": 0.8,
+                "timeout": 10
+            },
+            "delay": 0
+        }
+    ]
+}

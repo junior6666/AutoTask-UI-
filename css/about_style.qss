@@ -1,0 +1,48 @@
+/* 整体窗口背景 */
+#AboutDialog {
+    background: #fafafa;
+    font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+/* 标题 */
+#titleLabel {
+    font-size: 24px;
+    font-weight: bold;
+    color: #303133;
+    margin: 12px 0 8px 0;
+}
+
+/* 头像 */
+#avatarLabel {
+    border: 2px solid #dcdfe6;
+    border-radius: 32px;
+}
+
+/* 链接标签 */
+#linkLabel {
+    color: #606266;
+    font-size: 14px;
+}
+#linkLabel a {
+    text-decoration: none;
+}
+#linkLabel a:hover {
+    text-decoration: underline;
+}
+
+/* 简介文本框 */
+#introText {
+    background: #ffffff;
+    border: 1px solid #e4e7ed;
+    border-radius: 6px;
+    font-size: 13px;
+    color: #606266;
+    padding: 8px;
+}
+
+/* 打赏二维码 */
+#qrLabel {
+    border: 1px solid #ebeef5;
+    border-radius: 6px;
+    background: #ffffff;
+}

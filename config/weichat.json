@@ -1,0 +1,83 @@
+{
+    "name": "\u5b9a\u65f6\u53d1\u9001\u5fae\u4fe1\u6d88\u606f",
+    "schedule": {
+        "enable": "\u5b9a\u65f6\u6267\u884c",
+        "time": "13:14:00",
+        "interval": 1440,
+        "repeat": "\u65e0\u9650"
+    },
+    "steps": [
+        {
+            "type": "\u9f20\u6807\u70b9\u51fb",
+            "params": {
+                "image_path": "C:/Users/25096/Pictures/Saved Pictures/wechat_2025-08-18_004128_526.png",
+                "click_type": "\u5de6\u952e\u53cc\u51fb",
+                "offset_x": 0,
+                "offset_y": 0,
+                "confidence": 0.8,
+                "timeout": 10
+            },
+            "delay": 0
+        },
+        {
+            "type": "\u9f20\u6807\u70b9\u51fb",
+            "params": {
+                "image_path": "C:/Users/25096/Pictures/Saved Pictures/wechat_2025-08-18_123515_815.png",
+                "click_type": "\u5de6\u952e\u53cc\u51fb",
+                "offset_x": 0,
+                "offset_y": 0,
+                "confidence": 0.8,
+                "timeout": 10
+            },
+            "delay": 0
+        },
+        {
+            "type": "\u6587\u672c\u8f93\u5165",
+            "params": {
+                "text": "\u4eca\u5929\u662f2025\u5e748\u670821\u65e5\u7b2c233\u4e2a1314\uff0c\u6211\u4eec\u5df2\u76f8\u604b970\u59296\u65f614\u52060\u79d2\uff0c\u4ece\u5723\u8bde\u591c\u4e00\u76f4\u8d70\u5230\u4eca\u5929\uff0c\u672a\u6765\u4e5f\u8981\u4e00\u8d77\u95ea\u8000\uff01\ud83c\udf84\u2764",
+                "excel_path": "",
+                "sheet": "0",
+                "col": 0,
+                "mode": "\u987a\u5e8f",
+                "love_date": "2022-12-25T07:00:00"
+            },
+            "delay": 0
+        },
+        {
+            "type": "\u9f20\u6807\u70b9\u51fb",
+            "params": {
+                "image_path": "C:/Users/25096/Pictures/Saved Pictures/wechat_2025-08-18_011923_095.png",
+                "click_type": "\u5de6\u952e\u5355\u51fb",
+                "offset_x": 0,
+                "offset_y": 0,
+                "confidence": 0.8,
+                "timeout": 10
+            },
+            "delay": 0
+        },
+        {
+            "type": "\u9f20\u6807\u70b9\u51fb",
+            "params": {
+                "image_path": "C:/Users/25096/Pictures/wechat_2025-08-20_231438_761.png",
+                "click_type": "\u5de6\u952e\u5355\u51fb",
+                "offset_x": 0,
+                "offset_y": 0,
+                "confidence": 0.8,
+                "timeout": 10
+            },
+            "delay": 0
+        },
+        {
+            "type": "\u9f20\u6807\u70b9\u51fb",
+            "params": {
+                "image_path": "C:/Users/25096/Pictures/wechat_2025-08-20_231438_761.png",
+                "click_type": "\u5de6\u952e\u5355\u51fb",
+                "offset_x": 0,
+                "offset_y": 0,
+                "confidence": 0.8,
+                "timeout": 10
+            },
+            "delay": 0
+        }
+    ]
+}
