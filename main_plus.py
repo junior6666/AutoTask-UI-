@@ -10,7 +10,7 @@ from datetime import datetime, date, timedelta
 
 import openpyxl, random, itertools
 import pyautogui
-import pyperclip
+
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QListWidget, QPushButton, QGroupBox, QLabel, QLineEdit,
@@ -19,15 +19,18 @@ from PySide6.QtWidgets import (
     QListWidgetItem, QCheckBox, QMenu, QFrame, QStyle,
     QSplitter, QSizePolicy, QDialog, QDialogButtonBox,
     QGridLayout, QFileDialog, QMessageBox, QDoubleSpinBox,
-    QTextEdit, QPlainTextEdit, QSystemTrayIcon, QScrollArea, QInputDialog, QDateEdit, QDateTimeEdit
+    QTextEdit, QPlainTextEdit, QSystemTrayIcon, QScrollArea, QInputDialog, QDateEdit, QDateTimeEdit, QWidgetAction
 )
 from PySide6.QtCore import Qt, QTime, QSize, QSettings, Signal, QObject, QTimer, QPointF, QRectF, QDate, QDateTime, \
-    QPoint, QRect
+    QPoint, QRect, QThread, Slot
 from PySide6.QtGui import QIcon, QAction, QFont, QPalette, QColor, QLinearGradient, QTextCursor, QKeySequence, QPixmap, \
     QBrush, QPainterPath, QPainter, QPen, QMouseEvent
 
 import os
 from pathlib import Path
+
+from pynput import keyboard
+
 
 # 工具函数
 def resource_path(relative_path: str) -> str:
@@ -38,6 +41,37 @@ def resource_path(relative_path: str) -> str:
         base_path = os.path.abspath(".")   # 开发环境
     return os.path.join(base_path, relative_path)
 
+# hotkey_listener.py
+
+
+class HotkeyListener(QThread):
+    # 自定义信号：当按下 Esc 时触发
+    hotkey_activated = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.stop_event = threading.Event()  # 控制监听循环退出
+
+    def run(self):
+        """QThread 的主执行函数"""
+        def on_press(key):
+            if self.stop_event.is_set():
+                return False  # 停止监听器
+            try:
+                if key == keyboard.Key.esc:
+                    self.hotkey_activated.emit()  # 安全发射信号到主线程
+            except Exception as e:
+                print(f"热键监听错误: {e}")
+
+        # 启动 pynput 键盘监听（阻塞）
+        with keyboard.Listener(on_press=on_press) as listener:
+            listener.join()
+
+    def stop(self):
+        """安全停止监听线程"""
+        self.stop_event.set()  # 触发退出
+        self.quit()           # 请求线程退出
+        self.wait()           # 等待线程结束
 
 class RegionCaptureOverlay(QWidget):
     finished = Signal(QRect)   # 自定义信号，返回选区
@@ -317,86 +351,6 @@ class AboutDialog(QDialog):
         if qss_path.exists():
             with open(qss_path, 'r', encoding='utf-8') as f:
                 self.setStyleSheet(f.read())
-class AutoClicker:
-    def execute_mouse_click(self, params: dict):
-        """
-        根据图片定位并执行点击（或移动后点击）。
-
-        参数
-        ----
-        image_path : str
-            待查找图片路径
-        click_type : str
-            左键单击 | 左键双击 | 右键单击 | 中键单击
-        offset_x, offset_y : int
-            以图标中心为基准的偏移
-        confidence : float
-            图像识别置信度
-        timeout : int/float
-            最长查找时间（秒）
-        move_duration : float
-            鼠标移动到目标位置的动画时长（秒）
-        """
-        # ---------------- 读取参数 ----------------
-        image_path = params.get("image_path", "")
-        click_type = params.get("click_type", "左键单击")
-        offset_x = params.get("offset_x", 0)
-        offset_y = params.get("offset_y", 0)
-        confidence = params.get("confidence", 0.8)
-        timeout = params.get("timeout", 10)
-        move_duration = params.get("move_duration", 0.1)
-
-        if not image_path:
-            raise ValueError("image_path 不能为空")
-
-        print(f"[DEBUG] 开始定位图片: {image_path}")
-        print(f"[DEBUG] confidence={confidence}, timeout={timeout}s")
-
-        # ---------------- 1. 查找图标中心 ----------------
-        def find_image_center():
-            start = time.time()
-            while True:
-                    pos = pyautogui.locateCenterOnScreen(image_path, confidence=confidence)
-                    print(pos)
-                    if pos:
-                        return pos
-                    if time.time() - start > timeout:
-                        return None
-                    print('图片匹配失败，休息0.2秒后重试')
-                    time.sleep(0.2)
-
-        center = find_image_center()
-        if center is None:
-            raise RuntimeError(f"在 {timeout}s 内未找到图片: {image_path}")
-
-        # ---------------- 2. 计算最终坐标 ----------------
-        target_x = center.x + offset_x
-        target_y = center.y + offset_y
-        print(f"[DEBUG] 图标中心: {center} → 偏移后点击坐标: ({target_x}, {target_y})")
-
-        # ---------------- 3. 鼠标移动到目标 ----------------
-        try:
-            pyautogui.moveTo(target_x, target_y, duration=move_duration)
-            print(f"[DEBUG] 鼠标已移动到 ({target_x}, {target_y})，耗时 {move_duration}s")
-        except Exception as e:
-            print(f"[ERROR] 鼠标移动失败: {e}")
-            raise
-
-        # ---------------- 4. 执行点击 ----------------
-        def perform_click():
-            click_map = {
-                "左键单击": pyautogui.click,
-                "左键双击": pyautogui.doubleClick,
-                "右键单击": pyautogui.rightClick,
-                "中键单击": pyautogui.middleClick,
-            }
-            if click_type not in click_map:
-                raise ValueError(f"不支持的 click_type: {click_type}")
-
-            click_map[click_type](target_x, target_y)
-            print(f"[DEBUG] 已完成 {click_type} 操作")
-
-        perform_click()
 
 
 class TaskRunner(QObject):
@@ -405,7 +359,7 @@ class TaskRunner(QObject):
     task_stopped = Signal(str)
     log_message = Signal(str, str)  # 新增日志信号
 
-    def __init__(self, task_name, steps):
+    def __init__(self, task_name, steps,auto_skip_image_timeout=False,timeout=10,instant_click=False,move_duration=0.1):
         super().__init__()
         self.task_name = task_name
         self.steps = steps
@@ -414,12 +368,83 @@ class TaskRunner(QObject):
         self.repeat_count = 0
         self.max_repeat = 1  # 默认执行1次
 
+        self.auto_skip_image_timeout = auto_skip_image_timeout
+        self.timeout = timeout  # 用户设置的超时时间
+
+        self.instant_click = instant_click        # 是否跳过移动动画
+        self.default_move_duration = move_duration  # 全局移动动画时长
+
         self._excel_cycle = None
         self._excel_cache = {}   # 路径->(wb, ws, rows)
 
     def set_repeat_count(self, count):
         self.max_repeat = count
 
+    def execute_mouse_click(self, params):
+        image_path = params.get("image_path", "")
+        click_type = params.get("click_type", "左键单击")
+        offset_x = params.get("offset_x", 0)
+        offset_y = params.get("offset_y", 0)
+        confidence = params.get("confidence", 0.8)
+        timeout = self.timeout
+        move_duration = params.get("move_duration", self.default_move_duration)
+
+        if not image_path:
+            if self.auto_skip_image_timeout:
+                self.log_message.emit(self.task_name, "⚠️ 图片路径为空，跳过此步骤")
+                return
+            else:
+                raise ValueError("image_path 不能为空")
+
+        print(f"[DEBUG] 开始定位图片: {image_path}")
+
+        def find_image_center():
+            start = time.time()
+            while True:
+                pos = pyautogui.locateCenterOnScreen(image_path, confidence=confidence)
+                if pos:
+                    return pos
+                if time.time() - start > timeout:
+                    return None
+                time.sleep(0.2)
+
+        center = find_image_center()
+        if center is None:
+            if self.auto_skip_image_timeout:
+                self.log_message.emit(self.task_name, f"⚠️ 在 {timeout}s 内未找到图片: {os.path.basename(image_path)}，自动跳过")
+                return  # ✅ 跳过，不抛异常
+            else:
+                raise RuntimeError(f"在 {timeout}s 内未找到图片: {image_path}")
+
+        target_x = center.x + offset_x
+        target_y = center.y + offset_y
+
+        if not self.instant_click:
+            try:
+                pyautogui.moveTo(target_x, target_y, duration=move_duration)
+            except Exception as e:
+                if self.auto_skip_image_timeout:
+                    self.log_message.emit(self.task_name, f"⚠️ 鼠标移动失败，跳过: {e}")
+                    return
+                raise
+        else:
+            pyautogui.moveTo(target_x, target_y, duration=0)  # 瞬移
+
+        click_map = {
+            "左键单击": pyautogui.click,
+            "左键双击": pyautogui.doubleClick,
+            "右键单击": pyautogui.rightClick,
+            "中键单击": pyautogui.middleClick,
+        }
+        if click_type not in click_map:
+            if self.auto_skip_image_timeout:
+                self.log_message.emit(self.task_name, f"⚠️ 不支持的点击类型: {click_type}，跳过")
+                return
+            else:
+                raise ValueError(f"不支持的 click_type: {click_type}")
+
+        click_map[click_type](target_x, target_y)
+        print(f"[DEBUG] 已完成 {click_type} 操作")
     def run(self):
         self.is_running = True
         self.current_step = 0
@@ -546,9 +571,9 @@ class TaskRunner(QObject):
 
         return estimated_date
 
-    def execute_mouse_click(self, params):
-        AutoClicker().execute_mouse_click(params)
-        self.log_message.emit(self.task_name, "🖱️ 鼠标点击操作完成")
+    # def execute_mouse_click(self, params):
+    #     AutoClicker().execute_mouse_click(params)
+    #     self.log_message.emit(self.task_name, "🖱️ 鼠标点击操作完成")
 
     def execute_mouse_scroll(self, params):
         direction = params.get("direction", "向下滚动")
@@ -610,34 +635,42 @@ class TaskRunner(QObject):
 
                 sheet_id = params.get("sheet", "0")
                 col_index = int(params.get("col", 0))
-                mode = params.get("mode", "顺序")  # 顺序 / 随机
+                mode = params.get("mode", "顺序")
 
-                # 缓存 workbook / worksheet
-                cache_key = excel_path
-                if cache_key not in self._excel_cache:
+                # === 关键：使用 (文件, 表, 列) 作为缓存键 ===
+                cache_key = (excel_path, str(sheet_id), col_index)
+
+                # 1. 检查是否已缓存 workbook（避免重复打开）
+                wb_cache_key = excel_path
+                if wb_cache_key not in self._excel_cache:
                     wb = openpyxl.load_workbook(excel_path, data_only=True)
                     try:
                         ws = wb[int(sheet_id)] if str(sheet_id).isdigit() else wb[sheet_id]
                     except Exception:
                         ws = wb.worksheets[0]
                     rows = list(ws.iter_rows(values_only=True))
-                    self._excel_cache[cache_key] = (wb, ws, rows)
-                _, _, rows = self._excel_cache[cache_key]
+                    self._excel_cache[wb_cache_key] = (wb, ws, rows)
+                _, _, rows = self._excel_cache[wb_cache_key]
 
                 if not rows:
                     raise ValueError("Excel 表无数据")
 
-                # 去掉空值
                 cells = [row[col_index] for row in rows if len(row) > col_index and row[col_index] is not None]
                 if not cells:
                     raise ValueError("指定列为空")
 
-                # 顺序 or 随机
+                # === 2. 使用 cache_key 管理 cycle ===
                 if mode == "顺序":
-                    # 用类变量保存 cycle，确保多次 execute 时继续往下走
-                    if self._excel_cycle is None:
-                        self._excel_cycle = itertools.cycle(cells)
-                    text = next(self._excel_cycle)
+                    # 初始化类变量（如果还没创建）
+                    if not hasattr(self, '_excel_cycle_dict'):
+                        self._excel_cycle_dict = {}
+
+                    # 如果该 (文件, 表, 列) 组合没有 cycle，创建一个
+                    if cache_key not in self._excel_cycle_dict:
+                        self._excel_cycle_dict[cache_key] = itertools.cycle(cells)
+
+                    text = next(self._excel_cycle_dict[cache_key])
+
                 else:  # 随机
                     text = random.choice(cells)
 
@@ -936,37 +969,57 @@ class StepConfigDialog(QDialog):
             if special:
                 text += f"\n{special}"
 
-        self.text_edit.setText(text)
+        self.text_edit.setPlainText(text)
     def create_keyboard_input_panel(self):
         panel = QWidget()
         layout = QVBoxLayout(panel)
 
-        # 1. 原始文本输入
-        layout.addWidget(QLabel("输入文本（留空则用 Excel）:"))
-        self.text_edit = QLineEdit()
+        # 1. 原始文本输入（多行）
+        layout.addWidget(QLabel("输入文本（留空则用 Excel 或纪念日）:"))
+
+        self.text_edit = QPlainTextEdit()
+        self.text_edit.setPlaceholderText("在此输入固定文本...\n留空则自动从 Excel 或纪念日生成内容")
+        self.text_edit.setMaximumHeight(80)
+        self.text_edit.setLineWrapMode(QPlainTextEdit.WidgetWidth)
+
         layout.addWidget(self.text_edit)
-        love_group = QWidget()
-        g = QFormLayout(love_group)
+
 
         # -------- 新增纪念日区域 --------
-        # 新增纪念日区域
         love_group = QWidget()
-        g = QFormLayout(love_group)
+        h_layout = QHBoxLayout(love_group)  # 横向布局
 
+        # 1. 启用复选框
+        self.use_love_checkbox = QCheckBox("启用纪念日")
+        self.use_love_checkbox.setChecked(False)  # 默认不启用
+        h_layout.addWidget(self.use_love_checkbox)
+
+        # 2. 标签
+        h_layout.addWidget(QLabel("时间:"))
+
+        # 3. 时间选择器
         self.love_datetime_edit = QDateTimeEdit()
         self.love_datetime_edit.setCalendarPopup(True)
         self.love_datetime_edit.setDisplayFormat("yyyy-MM-dd hh:mm:ss")
-        # 默认去年此刻
-        self.love_datetime_edit.setDateTime(
-            QDateTime(QDate(2022, 12, 25), QTime(7, 0, 0))
-        )
-        g.addRow("恋爱纪念日:", self.love_datetime_edit)
+        self.love_datetime_edit.setDateTime(QDateTime(QDate(2022, 12, 25), QTime(7, 0, 0)))
+        # 可选：默认禁用，直到 checkbox 勾选
+        self.love_datetime_edit.setEnabled(False)
+        self.use_love_checkbox.toggled.connect(self.love_datetime_edit.setEnabled)
 
-        gen_btn = QPushButton("生成纪念日文案")
+        h_layout.addWidget(self.love_datetime_edit)
+
+        # 4. 生成按钮
+        gen_btn = QPushButton("生成文案")
         gen_btn.clicked.connect(self.generate_love_text)
-        g.addRow(gen_btn)
+        h_layout.addWidget(gen_btn)
 
+        # 可选：设置拉伸，防止挤压
+        h_layout.addStretch()
+
+        # 将 group 添加到主 layout
         layout.addWidget(love_group)
+
+
         # 3. Excel 区域
         excel_group = QWidget()
         g = QVBoxLayout(excel_group)
@@ -1007,6 +1060,7 @@ class StepConfigDialog(QDialog):
 
         layout.addWidget(excel_group)
         return panel
+
 
     def create_wait_panel(self):
         panel = QWidget()
@@ -1156,7 +1210,7 @@ class StepConfigDialog(QDialog):
             self.confidence_spin.setValue(params.get("confidence", 0.8))
             self.timeout_spin.setValue(params.get("timeout", 10))
         elif step_type == "文本输入":
-            self.text_edit.setText(params.get("text", ""))
+            self.text_edit.setPlainText(params.get("text", ""))
             self.excel_path_edit.setText(params.get("excel_path", ""))
             self.sheet_edit.setText(str(params.get("sheet", "0")))
             self.col_spin.setValue(int(params.get("col", 0)))
@@ -1201,13 +1255,18 @@ class StepConfigDialog(QDialog):
                 "timeout": self.timeout_spin.value()
             }
         elif step_type == "文本输入":
+            use_love = self.use_love_checkbox.isChecked()
+            love_date_str = ""
+            if use_love:
+                love_date_str = self.love_datetime_edit.dateTime().toPython().isoformat()
+
             params = {
-                "text": self.text_edit.text().strip(),
+                "text": self.text_edit.toPlainText().strip(),
                 "excel_path": self.excel_path_edit.text().strip(),
                 "sheet": self.sheet_edit.text().strip(),
                 "col": self.col_spin.value(),
                 "mode": self.mode_combo.currentText(),
-                "love_date": self.love_datetime_edit.dateTime().toPython().isoformat()
+                "love_date": love_date_str  # 只有启用时才传值
             }
         elif step_type == "等待":
             params = {
@@ -1377,6 +1436,10 @@ class AutomationUI(QMainWindow):
         self.task_runner = None
         self.task_thread = None
         self.scheduled_timers = {}  # 存储定时任务的计时器
+        # 热键监听器
+        self.hotkey_listener = None
+
+        self.setup_hotkey_listener()
 
         # 创建主布局
         main_widget = QWidget()
@@ -1629,6 +1692,18 @@ class AutomationUI(QMainWindow):
 
         # 创建系统托盘图标
         self.create_system_tray()
+    def setup_hotkey_listener(self):
+        """启动 Esc 热键监听"""
+        self.hotkey_listener = HotkeyListener(self)
+        self.hotkey_listener.hotkey_activated.connect(self.on_esc_pressed)
+        self.hotkey_listener.start()  # 启动线程
+    @Slot()
+    def on_esc_pressed(self):
+        """响应 Esc 键（在主线程执行）"""
+        if self.task_runner and self.task_thread and self.task_thread.is_alive():
+            self.stop_current_task()
+            self.statusBar().showMessage("🛑 Esc 被按下，任务已停止", 2000)
+
 
     def load_all_configs(self, config_dir="config"):
         """
@@ -1730,13 +1805,72 @@ class AutomationUI(QMainWindow):
     def create_menus(self):
         menu_bar = self.menuBar()
 
+        # === 新增：设置菜单 ===
+        settings_menu = menu_bar.addMenu("⚙️ 设置")
+        # 主容器
+        settings_widget = QWidget()
+        settings_layout = QVBoxLayout(settings_widget)
+        settings_layout.setContentsMargins(8, 4, 8, 4)
+        settings_layout.setSpacing(6)
+
+        # 1. 自动跳过 + 超时时间（纵向）
+        # --- 自动跳过复选框 ---
+        self.auto_skip_checkbox = QCheckBox("图片查找超时后自动跳过")
+        self.auto_skip_checkbox.setChecked(False)
+
+        # --- 超时时间（水平布局）---
+        timeout_layout = QHBoxLayout()
+        timeout_label = QLabel("超时时间:")
+        self.timeout_spinbox = QSpinBox()
+        self.timeout_spinbox.setRange(0, 3600)
+        self.timeout_spinbox.setValue(10)
+        self.timeout_spinbox.setSuffix(" 秒")
+        self.timeout_spinbox.setFixedWidth(80)
+        timeout_layout.addWidget(timeout_label)
+        timeout_layout.addWidget(self.timeout_spinbox)
+        timeout_layout.addStretch()
+
+        # 2. 鼠标移动设置（水平布局）
+        mouse_layout = QHBoxLayout()
+        self.instant_click_checkbox = QCheckBox("直接点击")
+        self.instant_click_checkbox.setChecked(False)
+
+        self.move_duration_spinbox = QDoubleSpinBox()
+        self.move_duration_spinbox.setRange(0.0, 10.0)
+        self.move_duration_spinbox.setSingleStep(0.1)
+        self.move_duration_spinbox.setValue(0.1)
+        self.move_duration_spinbox.setDecimals(1)
+        self.move_duration_spinbox.setSuffix(" 秒")
+        self.move_duration_spinbox.setFixedWidth(80)
+        self.move_duration_spinbox.setEnabled(False)  # 默认禁用，由 checkbox 控制
+
+        # 连接 checkbox 控制 spinbox 启用状态
+        def on_instant_click_toggled(checked):
+            self.move_duration_spinbox.setEnabled(not checked)
+
+        self.instant_click_checkbox.toggled.connect(on_instant_click_toggled)
+
+        mouse_layout.addWidget(self.instant_click_checkbox)
+        mouse_layout.addWidget(self.move_duration_spinbox)
+        mouse_layout.addStretch()
+
+        # 添加到主布局
+        settings_layout.addWidget(self.auto_skip_checkbox)
+        settings_layout.addLayout(timeout_layout)
+        settings_layout.addLayout(mouse_layout)
+
+        # 包装为菜单项
+        action = QWidgetAction(settings_menu)
+        action.setDefaultWidget(settings_widget)
+        settings_menu.addAction(action)
+
         # 文件菜单
         file_menu = menu_bar.addMenu("📁 文件")
-        new_action = QAction(QIcon.fromTheme("document-new"), "📝 新建任务", self)
-        save_action = QAction(QIcon.fromTheme("document-save"), "💾 保存配置", self)
-        export_action = QAction(QIcon.fromTheme("document-export"), "📤 导出配置", self)
-        import_action = QAction(QIcon.fromTheme("document-import"), "📥 导入配置", self)
-        exit_action = QAction(QIcon.fromTheme("application-exit"), "🚪 退出", self)
+        new_action = QAction("📝 新建任务", self)
+        save_action = QAction( "💾 保存配置", self)
+        export_action = QAction( "📤 导出配置", self)
+        import_action = QAction( "📥 导入配置", self)
+        exit_action = QAction( "🚪 退出", self)
 
         file_menu.addAction(new_action)
         file_menu.addAction(save_action)
@@ -1779,10 +1913,10 @@ class AutomationUI(QMainWindow):
 
         # 编辑菜单
         edit_menu = menu_bar.addMenu("✏️ 编辑")
-        add_step_action = QAction(QIcon.fromTheme("list-add"), "➕ 添加步骤", self)
-        edit_step_action = QAction(QIcon.fromTheme("document-edit"), "✏️ 编辑步骤", self)
-        remove_step_action = QAction(QIcon.fromTheme("list-remove"), "➖ 删除步骤", self)
-        copy_step_action = QAction(QIcon.fromTheme("edit-copy"), "📋 复制步骤", self)
+        add_step_action = QAction( "➕ 添加步骤", self)
+        edit_step_action = QAction( "✏️ 编辑步骤", self)
+        remove_step_action = QAction( "➖ 删除步骤", self)
+        copy_step_action = QAction("📋 复制步骤", self)
 
         edit_menu.addAction(add_step_action)
         edit_menu.addAction(edit_step_action)
@@ -1879,8 +2013,8 @@ class AutomationUI(QMainWindow):
 
         # 帮助菜单
         help_menu = menu_bar.addMenu("❓ 帮助")
-        about_action = QAction(QIcon.fromTheme("help-about"), "ℹ️ 关于", self)
-        docs_action = QAction(QIcon.fromTheme("help-contents"), "📚 使用文档", self)
+        about_action = QAction("ℹ️ 关于", self)
+        docs_action = QAction("📚 使用文档", self)
 
         help_menu.addAction(docs_action)
         help_menu.addAction(about_action)
@@ -2220,9 +2354,17 @@ class AutomationUI(QMainWindow):
         if not steps:
             QMessageBox.warning(self, "无法启动", "当前任务没有配置任何步骤")
             return
+        auto_skip = self.auto_skip_checkbox.isChecked()  # ✅ 读取 QCheckBox 状态
+        timeout = self.timeout_spinbox.value()  # 获取用户设置的超时时间
+        instant_click = self.instant_click_checkbox.isChecked()
+        move_duration = self.move_duration_spinbox.value() if not instant_click else 0.0
 
         # 创建任务运行器
-        self.task_runner = TaskRunner(self.current_task, steps)
+        self.task_runner = TaskRunner(self.current_task, steps,
+                                      auto_skip_image_timeout=auto_skip,
+                                      timeout=timeout,
+                                      instant_click=instant_click,
+                                      move_duration=move_duration)
 
         # 设置重复次数
         repeat_text = self.repeat_count.currentText()
@@ -2278,6 +2420,13 @@ class AutomationUI(QMainWindow):
                     widget.start_btn.setEnabled(True)
                     widget.stop_btn.setEnabled(False)
                     break
+
+    def closeEvent(self, event):
+        # 清理热键监听
+        if self.hotkey_listener and self.hotkey_listener.isRunning():
+            self.hotkey_listener.stop()
+
+        super().closeEvent(event)
 
     def on_task_completed(self, task_name, success, message):
         # 更新UI状态
@@ -2520,6 +2669,24 @@ class AutomationUI(QMainWindow):
                 QLabel {
                     color: #333;
                 }
+                QCheckBox {
+                    color: #333;
+                    spacing: 8px;
+                }
+                QCheckBox::indicator {
+                    width: 10px;
+                    height: 10px;
+                    border: 2px solid #999;
+                    border-radius: 4px;
+                    background: #fff;
+                }
+                QCheckBox::indicator:checked {
+                    background: #4CAF50;
+                    border: 2px solid #388E3C;
+                }
+                QCheckBox::indicator:hover {
+                    border-color: #4CAF50;
+                }
                 QListWidget::item:selected {
                     background-color: #e3f2fd;
                 }
@@ -2651,6 +2818,24 @@ class AutomationUI(QMainWindow):
                 }
                 QLabel {
                     color: #dcdcdc;
+                }
+                               QCheckBox {
+                    color: #dcdcdc;
+                    spacing: 8px;
+                }
+                QCheckBox::indicator {
+                    width: 10px;
+                    height: 10px;
+                    border: 2px solid #666;
+                    border-radius: 4px;
+                    background: #2d2d30;
+                }
+                QCheckBox::indicator:checked {
+                    background: #4CAF50;
+                    border: 2px solid #388E3C;
+                }
+                QCheckBox::indicator:hover {
+                    border-color: #4CAF50;
                 }
                 QListWidget::item:selected {
                     background-color: #3e3e40;
@@ -3050,3 +3235,10 @@ if __name__ == "__main__":
     window.setWindowIcon(ATIcon.icon())
     window.show()
     sys.exit(app.exec())
+
+    # app = QApplication(sys.argv)  # 必须初始化
+    # ok = ATIcon.pixmap().save("icon.ico", "ICO")
+    # if ok:
+    #     print("✅ icon.ico 已生成！")
+    # else:
+    #     print("❌ 保存失败")
