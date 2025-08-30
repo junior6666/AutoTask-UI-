@@ -1072,9 +1072,11 @@ class StepConfigDialog(QDialog):
         layout.addWidget(self.confidence_spin, 3, 1)
 
         layout.addWidget(QLabel("超时时间(秒):"), 3, 2)
-        self.timeout_spin = QSpinBox()
-        self.timeout_spin.setRange(1, 60)
-        self.timeout_spin.setValue(10)
+        self.timeout_spin = QDoubleSpinBox()
+        self.timeout_spin.setRange(0.1, 60)
+        self.timeout_spin.setSingleStep(0.1)
+        self.timeout_spin.setValue(1.0)
+        self.timeout_spin.setDecimals(1)
         layout.addWidget(self.timeout_spin, 3, 3)
 
         return panel
