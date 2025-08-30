@@ -119,7 +119,9 @@ class RegionCaptureOverlay(QWidget):
             p.drawRect(QRect(self.start_pos, self.end_pos).normalized())
 class StepTableHelper:
     """负责把步骤对象渲染成表格行的工具类，可放到主窗口里复用"""
-    FIXED_ROW_HEIGHT = 30          # 统一行高（像素）
+    FIXED_ROW_HEIGHT = 32          # 统一行高（像素）
+    ICON_SIZE = 20          # 左侧图标宽/高
+    IMG_HEIGHT = 32         # 如果是图片，缩略图高度
 
     @staticmethod
     def desc_of(step: dict) -> str:
@@ -146,6 +148,111 @@ class StepTableHelper:
         if t == "拖拽":
             return f"拖拽 · ({p.get('start_x', 0)},{p.get('start_y', 0)})→({p.get('end_x', 0)},{p.get('end_y', 0)}) · {time_str}"
         return t
+
+    @staticmethod
+    def widget_of(step: dict) -> QWidget:
+        """
+        返回一个可直接塞进 QTableWidget 的 QWidget，
+        内部 QLabel 负责显示图标/文字/图片 + 时间
+        """
+        t = step["type"]
+        p = step["params"]
+        time_str = step.get("step_time",datetime.now().strftime("%H:%M:%S"))
+
+        # 主容器
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(4, 2, 4, 2)
+
+        # 左侧图标或图片
+        icon_label = QLabel()
+        icon_label.setFixedSize(StepTableHelper.ICON_SIZE, StepTableHelper.ICON_SIZE)
+        icon_label.setScaledContents(True)
+
+        # 中间文字/图片
+        content_label = QLabel()
+        content_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        content_label.setStyleSheet("""color:#ffffff;
+background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #e5e5e5,stop:0.5 #bdbdbd,stop:1 #9e9e9e);
+border-radius:6px;
+padding:2px 6px;
+font-weight:bold;""")
+
+        # 右侧时间
+        time_label = QLabel(time_str)
+        time_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        font = QFont()
+        font.setPointSize(8)
+        time_label.setFont(font)
+        time_label.setStyleSheet("""color:#ffffff;
+background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #0078d4,stop:1 #00bcf2);
+border-radius:6px;
+padding:2px 6px;
+font-weight:bold;""")
+
+        # 根据类型生成内容
+        if t == "鼠标点击":
+            img_path = p.get("image_path", "")
+            if os.path.isfile(img_path):
+                pm = QPixmap(img_path).scaledToHeight(StepTableHelper.IMG_HEIGHT, Qt.SmoothTransformation)
+                content_label.setPixmap(pm)
+            else:
+                content_label.setText(os.path.basename(img_path))
+            icon_label.setText("👆")
+
+        elif t == "文本输入":
+            txt = p.get("text", "")
+            if txt:
+                txt = txt[:10] + "…" if len(txt) > 10 else txt
+                content_label.setText(txt)
+            else:
+                mode = p.get("mode", "顺序")
+                file = os.path.basename(p.get("excel_path", ""))
+                content_label.setText(f"{mode}·{file}")
+            icon_label.setText("⌨")
+
+        elif t == "等待":
+            content_label.setText(f"{p.get('seconds', 0)}s")
+            icon_label.setText("⏱")
+
+        elif t == "截图":
+            save_path = p.get("save_path", "")
+            if os.path.isfile(save_path):
+                pm = QPixmap(save_path).scaledToHeight(StepTableHelper.IMG_HEIGHT, Qt.SmoothTransformation)
+                content_label.setPixmap(pm)
+            else:
+                content_label.setText(os.path.basename(save_path))
+            icon_label.setText("📸")
+
+        elif t == "鼠标滚轮":
+            dire = p.get("direction", "向下")
+            clicks = p.get("clicks", 3)
+            content_label.setText(f"{dire}{clicks}格")
+            icon_label.setText("⚙")
+        elif t == "键盘热键":
+            hotkey = p.get("hotkey", "ctrl+c").upper()
+            delay = p.get("delay_ms", 100)
+            content_label.setText(f"{hotkey}")
+            time_label.setText(f"{delay} ms")
+            icon_label.setText("⌨")
+        elif t == "拖拽":
+            sx, sy = p.get("start_x", 0), p.get("start_y", 0)
+            ex, ey = p.get("end_x", 0), p.get("end_y", 0)
+            content_label.setText(f"({sx},{sy})→({ex},{ey})")
+            icon_label.setText("✋")
+
+        else:
+            content_label.setText(t)
+            icon_label.setText("?")
+
+        # 加入布局
+        layout.addWidget(icon_label)
+        layout.addWidget(content_label, 1)   # 伸缩
+        layout.addWidget(time_label)
+
+        return container
+
+
     @staticmethod
     def thumb_widget(img_path: str, row_height: int) -> QWidget:
         """返回一个已设置好缩略图的 QLabel，高度=row_height，宽度自适应"""
@@ -494,6 +601,8 @@ class TaskRunner(QObject):
                         self.execute_drag(params)
                     elif step_type == "鼠标滚轮":
                         self.execute_mouse_scroll(params)
+                    elif step_type == "键盘热键":
+                        self.execute_hotkey(params)
                     else:
                         self.log_message.emit(self.task_name, f"⚠️ 未知步骤类型: {step_type}")
 
@@ -588,6 +697,21 @@ class TaskRunner(QObject):
             self.log_message.emit(self.task_name, "✅ 滚轮完成")
         except Exception as e:
             self.log_message.emit(self.task_name, f"❌ 滚轮出错: {str(e)}")
+            raise
+
+    def execute_hotkey(self, params):
+        hotkey = params.get("hotkey", "ctrl+c")
+        delay = params.get("delay_ms", 100)
+
+        self.log_message.emit(self.task_name, f"⌨ 热键 {hotkey.upper()} 执行")
+
+        try:
+            pyautogui.hotkey(*hotkey.split("+"))
+            if delay > 0:
+                time.sleep(delay / 1000.0)
+            self.log_message.emit(self.task_name, "✅ 热键完成")
+        except Exception as e:
+            self.log_message.emit(self.task_name, f"❌ 热键出错: {str(e)}")
             raise
 
     def execute_keyboard_input(self, params):
@@ -751,7 +875,7 @@ class StepConfigDialog(QDialog):
         type_layout = QHBoxLayout()
         type_layout.addWidget(QLabel("步骤类型:"))
         self.type_combo = QComboBox()
-        self.type_combo.addItems(["鼠标点击", "文本输入", "等待", "截图", "拖拽", "鼠标滚轮"])
+        self.type_combo.addItems(["鼠标点击", "文本输入", "等待", "截图", "拖拽", "鼠标滚轮", '键盘热键'])
         type_layout.addWidget(self.type_combo)
         layout.addLayout(type_layout)
 
@@ -767,6 +891,7 @@ class StepConfigDialog(QDialog):
         self.screenshot_panel = self.create_screenshot_panel()
         self.drag_panel = self.create_drag_panel()
         self.scroll_panel = self.create_mouse_scroll_panel()
+        self.hot_keyboard_panel = self.create_hot_keyboard_panel()
 
 
         # 添加到堆栈
@@ -776,6 +901,7 @@ class StepConfigDialog(QDialog):
         self.params_layout.addWidget(self.screenshot_panel)
         self.params_layout.addWidget(self.drag_panel)
         self.params_layout.addWidget(self.scroll_panel)
+        self.params_layout.addWidget(self.hot_keyboard_panel)
 
         layout.addWidget(self.params_stack)
 
@@ -822,6 +948,33 @@ class StepConfigDialog(QDialog):
 
         return panel
 
+    def create_hot_keyboard_panel(self):
+        panel = QWidget()
+        layout = QFormLayout(panel)
+
+        # 热键选择下拉框
+        self.hotkey_combo = QComboBox()
+        self.hotkey_combo.addItems([
+            "Ctrl+A  全选",
+            "Ctrl+C  复制",
+            "Ctrl+V  粘贴",
+            "Ctrl+X  剪切",
+            "Ctrl+Z  撤销",
+            "Ctrl+Y  重做",
+            "Ctrl+S  保存",
+            "Ctrl+F  查找"
+        ])
+        layout.addRow("热键:", self.hotkey_combo)
+
+        # 额外延迟（ms）
+        self.hotkey_delay_spin = QSpinBox()
+        self.hotkey_delay_spin.setRange(0, 5000)
+        self.hotkey_delay_spin.setValue(100)
+        self.hotkey_delay_spin.setSuffix(" ms")
+        layout.addRow("执行后延时:", self.hotkey_delay_spin)
+
+        return panel
+
     def capture_region(self):
         parent = self.parent()
         parent.hide()
@@ -851,8 +1004,8 @@ class StepConfigDialog(QDialog):
             0, geo.x(), geo.y(), geo.width(), geo.height()
         )
 
-        # img_dir = os.path.join(os.getcwd(), "img")
-        img_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "img")
+        img_dir = os.path.join(os.getcwd(), "img")
+        # img_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "img")
         os.makedirs(img_dir, exist_ok=True)
         file_name = datetime.now().strftime("%Y%m%d_%H%M%S") + ".png"
         file_path = os.path.join(img_dir, file_name)
@@ -1192,6 +1345,8 @@ class StepConfigDialog(QDialog):
             self.drag_panel.show()
         elif step_type == "鼠标滚轮":
             self.scroll_panel.show()
+        elif step_type == "键盘热键":
+            self.hot_keyboard_panel.show()
 
     def load_step_data(self, step_data):
         step_type = step_data.get("type", "")
@@ -1239,7 +1394,20 @@ class StepConfigDialog(QDialog):
         elif step_type == "鼠标滚轮":
             self.scroll_direction_combo.setCurrentText(params.get("direction", "向下滚动"))
             self.scroll_clicks_spin.setValue(params.get("clicks", 3))
-
+        elif step_type == "键盘热键":
+            hotkey_map = {
+                "ctrl+a": "Ctrl+A  全选",
+                "ctrl+c": "Ctrl+C  复制",
+                "ctrl+v": "Ctrl+V  粘贴",
+                "ctrl+x": "Ctrl+X  剪切",
+                "ctrl+z": "Ctrl+Z  撤销",
+                "ctrl+y": "Ctrl+Y  重做",
+                "ctrl+s": "Ctrl+S  保存",
+                "ctrl+f": "Ctrl+F  查找"
+            }
+            key_str = params.get("hotkey", "").lower()
+            self.hotkey_combo.setCurrentText(hotkey_map.get(key_str, "Ctrl+C  复制"))
+            self.hotkey_delay_spin.setValue(params.get("delay_ms", 100))
 
     def get_step_data(self):
         step_type = self.type_combo.currentText()
@@ -1295,6 +1463,14 @@ class StepConfigDialog(QDialog):
                 "direction": self.scroll_direction_combo.currentText(),
                 "clicks": self.scroll_clicks_spin.value()
             }
+        elif step_type == "键盘热键":
+            hotkey_text = self.hotkey_combo.currentText()  # 例如 "Ctrl+C  复制"
+            key_only = hotkey_text.split()[0]  # 取 "Ctrl+C"
+            params = {
+                "hotkey": key_only.lower(),  # 统一存小写，如 "ctrl+c"
+                "delay_ms": self.hotkey_delay_spin.value()
+            }
+        params["step_time"] = datetime.now().strftime("%H:%M:%S")
         return {
             "type": step_type,
             "params": params,
@@ -1577,7 +1753,6 @@ class AutomationUI(QMainWindow):
 
         # 应用定时设置按钮
         self.apply_schedule_btn = QPushButton("应用定时设置")
-        self.apply_schedule_btn.setIcon(QIcon.fromTheme("dialog-ok-apply"))
         schedule_layout.addWidget(self.apply_schedule_btn, 2, 0, 1, 5)
 
         schedule_group.setLayout(schedule_layout)
@@ -1605,8 +1780,9 @@ class AutomationUI(QMainWindow):
         self.edit_step_btn = QPushButton("✏️ 编辑步骤 (E)")
         self.edit_step_btn.setShortcut(QKeySequence("Ctrl+E"))
         self.remove_step_btn = QPushButton("➖ 删除步骤 (Del)")
+        self.remove_step_btn.setShortcut(QKeySequence.Delete)  # 确保删除按钮的快捷键为 Delete
         self.copy_step_btn = QPushButton("📋 复制步骤")
-        self.remove_step_btn.setShortcut(QKeySequence.Delete)
+        self.copy_step_btn.setShortcut(QKeySequence("Ctrl+C"))  # 新增：设置复制按钮的快捷键为 Ctrl+C
         self.move_up_btn = QPushButton("⬆️ 上移 (↑)")
         self.move_up_btn.setShortcut(QKeySequence("Ctrl+Up"))
         self.move_down_btn = QPushButton("⬇️ 下移 (↓)")
@@ -2119,43 +2295,6 @@ class AutomationUI(QMainWindow):
         AboutDialog(self).exec()
 
 
-    def populate_steps_table(self):
-        # 添加示例步骤
-        steps = [
-            {"type": "鼠标点击", "desc": "点击登录按钮", "params": {"image_path": "login_btn.png"}, "delay": 2},
-            {"type": "文本输入", "desc": "输入用户名", "params": {"text": "admin"}, "delay": 1},
-            {"type": "文本输入", "desc": "输入密码", "params": {"text": "******"}, "delay": 1},
-            {"type": "等待", "desc": "等待页面加载", "params": {"seconds": 3}, "delay": 0},
-            {"type": "截图", "desc": "保存结果", "params": {"save_path": "result.png"}, "delay": 0}
-        ]
-        self.steps_table.verticalHeader().setDefaultSectionSize(
-            StepTableHelper.FIXED_ROW_HEIGHT
-        )
-        self.steps_table.horizontalHeader().setStretchLastSection(True)
-
-        self.steps_table.setRowCount(len(steps))
-        for row, step in enumerate(steps):
-            self.steps_table.setItem(row, 0, QTableWidgetItem(step["type"]))
-            self.steps_table.setItem(row, 1, QTableWidgetItem(step["desc"]))
-
-            # 格式化参数显示
-            params_text = ""
-            if step["type"] == "鼠标点击":
-                params_text = f"图片: {step['params'].get('image_path', '')}"
-            elif step["type"] == "文本输入":
-                params_text = f"文本: {step['params'].get('text', '')}"
-            elif step["type"] == "等待":
-                params_text = f"等待: {step['params'].get('seconds', 0)}秒"
-            elif step["type"] == "截图":
-                params_text = f"保存到: {step['params'].get('save_path', '')}"
-            elif step["type"] == "鼠标滚轮":
-                params_text = f"鼠标滚轮: {step['params'].get('direction', '向下滚动')},{step['params'].get('clicks', '3')}格"
-            elif step["type"] == "拖拽":
-                params_text = f"从({step['params'].get('start_x', 0)},{step['params'].get('start_y', 0)})到({step['params'].get('end_x', 0)},{step['params'].get('end_y', 0)})"
-
-            self.steps_table.setItem(row, 2, QTableWidgetItem(params_text))
-            self.steps_table.setItem(row, 3, QTableWidgetItem(str(step["delay"])))
-
     def add_task(self, name):
         # 创建自定义列表项
         item = QListWidgetItem(self.task_list)
@@ -2318,7 +2457,10 @@ class AutomationUI(QMainWindow):
         self.steps_table.insertRow(row)
 
         self.steps_table.setItem(row, 0, QTableWidgetItem(step["type"]))
-        self.steps_table.setItem(row, 1, QTableWidgetItem(StepTableHelper.desc_of(step)))
+        # self.steps_table.setItem(row, 1, QTableWidgetItem(StepTableHelper.desc_of(step)))
+        w = StepTableHelper.widget_of(step)
+        self.steps_table.setCellWidget(row, 1, w)
+        self.steps_table.setRowHeight(row, max(StepTableHelper.IMG_HEIGHT + 4, 24))
         self.steps_table.verticalHeader().setDefaultSectionSize(
             StepTableHelper.FIXED_ROW_HEIGHT
         )
@@ -2336,12 +2478,16 @@ class AutomationUI(QMainWindow):
             params_text = f"保存到: {step['params'].get('save_path', '')}"
         elif step["type"] == "鼠标滚轮":
             params_text = f"鼠标滚轮: {step['params'].get('direction', '向下滚动')},{step['params'].get('clicks', '3')}格"
+        elif step["type"] == "键盘热键":
+            hotkey = step["params"].get("hotkey", "ctrl+c").upper()
+            delay = step["params"].get("delay_ms", 100)
+            params_text = f"键盘热键: {hotkey}, 延时 {delay} ms"
         elif step["type"] == "拖拽":
             params_text = f"从({step['params'].get('start_x', 0)},{step['params'].get('start_y', 0)})到({step['params'].get('end_x', 0)},{step['params'].get('end_y', 0)})"
 
         self.steps_table.setItem(row, 2, QTableWidgetItem(params_text))
         self.steps_table.setItem(row, 3, QTableWidgetItem(str(step.get("delay", 0))))
-        self.steps_table.resizeColumnToContents(2)  # 列宽按内容自适应
+        self.steps_table.resizeColumnToContents(1)  # 列宽按内容自适应
 
     def start_current_task(self):
         if not self.current_task:
@@ -2402,6 +2548,9 @@ class AutomationUI(QMainWindow):
                 widget.stop_btn.setEnabled(True)
                 break
 
+        # 新增：任务开始后最小化窗口
+        self.showMinimized()
+
     def stop_current_task(self):
         if self.task_runner and self.task_runner.is_running:
             self.task_runner.stop()
@@ -2429,20 +2578,26 @@ class AutomationUI(QMainWindow):
         super().closeEvent(event)
 
     def on_task_completed(self, task_name, success, message):
+        # 新增：任务完成后恢复窗口显示
+        self.showNormal()
+
         # 更新UI状态
         self.start_current_btn.setEnabled(True)
         self.stop_current_btn.setEnabled(False)
-        self.task_status.setText(message)
+        self.task_status.setText("已停止" if success else "已中断")
 
         # 更新任务列表中的状态
         for i in range(self.task_list.count()):
             item = self.task_list.item(i)
             widget = self.task_list.itemWidget(item)
             if widget and widget.task_name == task_name:
-                widget.status_label.setText(message)
+                widget.status_label.setText("已停止" if success else "已中断")
                 widget.start_btn.setEnabled(True)
                 widget.stop_btn.setEnabled(False)
                 break
+
+        # 记录日志
+        self.log_text.appendPlainText(f"[{time.strftime('%H:%M:%S')}] {message}")
 
     def on_task_progress(self, task_name, current, total):
         self.task_status.setText(f"运行中 ({current}/{total})")
@@ -2755,16 +2910,18 @@ class AutomationUI(QMainWindow):
             """)
 
             self.apply_schedule_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #FF9800;
-                    border: 1px solid #F57C00;
-                    color: white;
-                    padding: 5px;
-                    border-radius: 4px;
-                }
-                QPushButton:hover {
-                    background-color: #F57C00;
-                }
+QPushButton {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                stop:0 #f5f5f5, stop:0.5 #e8f5e9, stop:1 #c8e6c9);
+    border: 1px solid #a5d6a7;
+    color: #004d40;
+    padding: 5px;
+    border-radius: 4px;
+}
+QPushButton:hover {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                stop:0 #e8f5e9, stop:0.5 #c8e6c9, stop:1 #a5d6a7);
+}
             """)
 
             self.clear_log_btn.setStyleSheet("""
@@ -2904,19 +3061,6 @@ class AutomationUI(QMainWindow):
                 }
             """)
 
-            self.apply_schedule_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #FF9800;
-                    border: 1px solid #F57C00;
-                    color: white;
-                    padding: 5px;
-                    border-radius: 4px;
-                }
-                QPushButton:hover {
-                    background-color: #F57C00;
-                }
-            """)
-
             self.clear_log_btn.setStyleSheet("""
                 QPushButton {
                     background-color: #9E9E9E;
@@ -3031,7 +3175,12 @@ class AutomationUI(QMainWindow):
             # 移动表格行
             self.steps_table.insertRow(selected_row - 1)
             for col in range(self.steps_table.columnCount()):
+                # 移动 QTableWidgetItem
                 self.steps_table.setItem(selected_row - 1, col, self.steps_table.takeItem(selected_row + 1, col))
+                # 移动 cellWidget
+                widget = self.steps_table.cellWidget(selected_row + 1, col)
+                if widget:
+                    self.steps_table.setCellWidget(selected_row - 1, col, widget)
             self.steps_table.removeRow(selected_row + 1)
             self.steps_table.setCurrentCell(selected_row - 1, 0)
 
@@ -3046,7 +3195,12 @@ class AutomationUI(QMainWindow):
             # 移动表格行
             self.steps_table.insertRow(selected_row + 2)
             for col in range(self.steps_table.columnCount()):
+                # 移动 QTableWidgetItem
                 self.steps_table.setItem(selected_row + 2, col, self.steps_table.takeItem(selected_row, col))
+                # 移动 cellWidget
+                widget = self.steps_table.cellWidget(selected_row, col)
+                if widget:
+                    self.steps_table.setCellWidget(selected_row + 2, col, widget)
             self.steps_table.removeRow(selected_row)
             self.steps_table.setCurrentCell(selected_row + 1, 0)
 

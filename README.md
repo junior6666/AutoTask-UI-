@@ -102,7 +102,7 @@ MIT © 2024 AutoTask-UI Contributors 🧑‍💻👩‍💻
 ## 📦 项目打包
 
 ```bash
-pyinstaller -F -w -i icon.ico --add-data "img;img" main_plus.py
+pyinstaller -F -w -i icon.ico --add-data "img;img;" --add-data "config;config" main_plus.py
 ```
 
 ---
