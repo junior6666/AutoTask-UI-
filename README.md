@@ -102,7 +102,17 @@ MIT © 2024 AutoTask-UI Contributors 🧑‍💻👩‍💻
 ## 📦 项目打包
 
 ```bash
-pyinstaller -F -w -i icon.ico --add-data "img;img;" --add-data "config;config" main_plus.py
+pyinstaller -F -w -i icon.ico --add-data "img;img;" main_plus.py
+
+pyinstaller main_plus.spec
+
+pyinstaller -F -w ^
+  --icon=app.ico ^
+  --add-data "templates;templates" ^
+  --add-binary "oracle/instantclient_21_1/*;." ^
+  --hidden-import=cx_Oracle ^
+  --name MyApp ^
+  main.py
 ```
 
 ---

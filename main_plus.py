@@ -157,7 +157,7 @@ class StepTableHelper:
         """
         t = step["type"]
         p = step["params"]
-        time_str = step.get("step_time",datetime.now().strftime("%H:%M:%S"))
+        time_str = p.get("step_time",datetime.now().strftime("%H:%M:%S"))
 
         # 主容器
         container = QWidget()
@@ -1999,9 +1999,10 @@ class AutomationUI(QMainWindow):
         # --- 超时时间（水平布局）---
         timeout_layout = QHBoxLayout()
         timeout_label = QLabel("超时时间:")
-        self.timeout_spinbox = QSpinBox()
-        self.timeout_spinbox.setRange(0, 3600)
-        self.timeout_spinbox.setValue(10)
+        self.timeout_spinbox = QDoubleSpinBox()
+        self.timeout_spinbox.setRange(0, 600)
+        self.timeout_spinbox.setSingleStep(0.5)
+        self.timeout_spinbox.setValue(3)
         self.timeout_spinbox.setSuffix(" 秒")
         self.timeout_spinbox.setFixedWidth(80)
         timeout_layout.addWidget(timeout_label)
@@ -3272,6 +3273,9 @@ QPushButton:hover {
                 task_name = task_config.get("name", "导入的任务")
                 self.add_task(task_name)
                 self.tasks[task_name] = task_config
+                self.steps_table.setRowCount(0)
+                for step in task_config["steps"]:
+                    self.add_step_to_table(step)
 
                 # 选中新导入的任务
                 for i in range(self.task_list.count()):
