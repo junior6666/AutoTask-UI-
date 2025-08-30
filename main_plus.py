@@ -1741,10 +1741,10 @@ class AutomationUI(QMainWindow):
         schedule_layout.addWidget(QLabel("重复间隔:"), 1, 0)
         self.repeat_interval = QSpinBox()
         self.repeat_interval.setRange(0, 1440)
-        self.repeat_interval.setValue(10)
+        self.repeat_interval.setValue(0)
         self.repeat_interval.setMinimumWidth(60)
         schedule_layout.addWidget(self.repeat_interval, 1, 1)
-        schedule_layout.addWidget(QLabel("分钟"), 1, 2)
+        schedule_layout.addWidget(QLabel("分钟(24h=1440m)"), 1, 2)
 
         # 重复次数
         schedule_layout.addWidget(QLabel("重复次数:"), 1, 3)
@@ -2521,8 +2521,9 @@ class AutomationUI(QMainWindow):
             self.task_runner.set_repeat_count(9999)  # 设置一个很大的数表示无限
         else:
             try:
-                count = int(repeat_text)
-                self.task_runner.set_repeat_count(count)
+                if self.repeat_interval.value() == 0:
+                    count = int(repeat_text)
+                    self.task_runner.set_repeat_count(count)
             except:
                 self.task_runner.set_repeat_count(1)
 
@@ -3323,46 +3324,52 @@ QPushButton:hover {
         # 计算延迟时间（毫秒）
         delay_ms = now.msecsTo(first_run)
 
-        # 创建定时器
-        timer = QTimer(self)
-        timer.setSingleShot(True)  # 第一次执行是单次
+        # 创建首次执行的定时器
+        initial_timer = QTimer(self)
+        initial_timer.setSingleShot(True)  # 只执行一次
 
-        # 连接定时器信号
-        def run_task():
+        def run_initial_task():
             # 执行任务
             self.start_current_task()
-
-            # 如果不是无限循环，减少重复次数
-            if repeat_count != "无限":
+            
+            # 如果需要重复执行，设置重复定时器
+            if repeat_count == "无限":
+                repeat_timer = QTimer(self)
+                repeat_timer.timeout.connect(self.start_current_task)
+                repeat_timer.setInterval(interval_minutes * 60 * 1000)  # 转换为毫秒
+                repeat_timer.start()
+                # 保存重复定时器引用
+                self.scheduled_timers[task_name] = repeat_timer
+            elif repeat_count != "1":
                 try:
-                    count = int(repeat_count)
-                    if count > 1:
-                        # 设置间隔定时器
-                        interval_timer = QTimer(self)
-                        interval_timer.setInterval(interval_minutes * 60 * 1000)  # 分钟转毫秒
-                        interval_timer.timeout.connect(
-                            lambda: self.run_scheduled_task(task_name, interval_timer, count - 1))
-                        interval_timer.start()
-                    # 保存定时器引用
-                    self.scheduled_timers[task_name] = interval_timer
-                except:
-                    pass
-            else:
-                # 无限循环
-                interval_timer = QTimer(self)
-                interval_timer.setInterval(interval_minutes * 60 * 1000)  # 分钟转毫秒
-                interval_timer.timeout.connect(self.start_current_task)
-                interval_timer.start()
-                # 保存定时器引用
-                self.scheduled_timers[task_name] = interval_timer
+                    total_count = int(repeat_count)
+                    current_count = 1  # 第一次已经执行
+                    
+                    if current_count < total_count:
+                        repeat_timer = QTimer(self)
+                        
+                        def run_repeat_task():
+                            nonlocal current_count
+                            self.start_current_task()
+                            current_count += 1
+                            if current_count >= total_count:
+                                repeat_timer.stop()
+                                if task_name in self.scheduled_timers:
+                                    del self.scheduled_timers[task_name]
+                        
+                        repeat_timer.timeout.connect(run_repeat_task)
+                        repeat_timer.setInterval(interval_minutes * 60 * 1000)
+                        repeat_timer.start()
+                        # 保存重复定时器引用
+                        self.scheduled_timers[task_name] = repeat_timer
+                except ValueError:
+                    pass  # 无效的重复次数
 
-        timer.timeout.connect(run_task)
+        initial_timer.timeout.connect(run_initial_task)
+        initial_timer.start(delay_ms)
 
-        # 启动定时器
-        timer.start(delay_ms)
-
-        # 保存定时器引用
-        self.scheduled_timers[task_name] = timer
+        # 保存首次执行定时器引用
+        self.scheduled_timers[task_name] = initial_timer
 
         # 显示提示信息
         self.log_text.appendPlainText(

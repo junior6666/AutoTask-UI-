@@ -106,13 +106,7 @@ pyinstaller -F -w -i icon.ico --add-data "img;img;" main_plus.py
 
 pyinstaller main_plus.spec
 
-pyinstaller -F -w ^
-  --icon=app.ico ^
-  --add-data "templates;templates" ^
-  --add-binary "oracle/instantclient_21_1/*;." ^
-  --hidden-import=cx_Oracle ^
-  --name MyApp ^
-  main.py
+pyinstaller -F -w -i icon.ico --add-data "img;img" --name auto_Task2.0 main_plus.py
 ```
 
 ---
