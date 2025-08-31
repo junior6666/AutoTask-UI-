@@ -700,13 +700,62 @@ class TaskRunner(QObject):
             raise
 
     def execute_hotkey(self, params):
-        hotkey = params.get("hotkey", "ctrl+c")
+        hotkey = params.get("hotkey", "")
         delay = params.get("delay_ms", 100)
 
-        self.log_message.emit(self.task_name, f"⌨ 热键 {hotkey.upper()} 执行")
+        if not hotkey:
+            self.log_message.emit(self.task_name, "⚠️ 未设置热键")
+            return
+
+        self.log_message.emit(self.task_name, f"⌨ 热键 {hotkey} 执行")
 
         try:
-            pyautogui.hotkey(*hotkey.split("+"))
+            # 解析热键字符串
+            keys = hotkey.lower().split("+")
+
+            # 转换为pyautogui可识别的键名
+            pyautogui_keys = []
+            for key in keys:
+                # 处理特殊键名映射
+                key_map = {
+                    "ctrl": "ctrl",
+                    "alt": "alt",
+                    "shift": "shift",
+                    "win": "win",
+                    "cmd": "cmd",
+                    "enter": "enter",
+                    "return": "enter",
+                    "space": "space",
+                    "tab": "tab",
+                    "esc": "esc",
+                    "escape": "esc",
+                    "backspace": "backspace",
+                    "delete": "delete",
+                    "insert": "insert",
+                    "home": "home",
+                    "end": "end",
+                    "pageup": "pageup",
+                    "pagedown": "pagedown",
+                    "up": "up",
+                    "down": "down",
+                    "left": "left",
+                    "right": "right",
+                    "capslock": "capslock",
+                    "numlock": "numlock",
+                    "scrolllock": "scrolllock"
+                }
+
+                if key in key_map:
+                    pyautogui_keys.append(key_map[key])
+                else:
+                    pyautogui_keys.append(key)
+
+            # 执行热键
+            if len(pyautogui_keys) == 1:
+                pyautogui.press(pyautogui_keys[0])
+            else:
+                pyautogui.hotkey(*pyautogui_keys)
+
             if delay > 0:
                 time.sleep(delay / 1000.0)
             self.log_message.emit(self.task_name, "✅ 热键完成")
@@ -952,19 +1001,31 @@ class StepConfigDialog(QDialog):
         panel = QWidget()
         layout = QFormLayout(panel)
 
-        # 热键选择下拉框
-        self.hotkey_combo = QComboBox()
-        self.hotkey_combo.addItems([
-            "Ctrl+A  全选",
-            "Ctrl+C  复制",
-            "Ctrl+V  粘贴",
-            "Ctrl+X  剪切",
-            "Ctrl+Z  撤销",
-            "Ctrl+Y  重做",
-            "Ctrl+S  保存",
-            "Ctrl+F  查找"
+        # 热键输入框和按钮
+        hotkey_layout = QHBoxLayout()
+        self.hotkey_input = QLineEdit()
+        self.hotkey_input.setPlaceholderText("点击按钮录制热键")
+        self.hotkey_input.setReadOnly(True)
+
+        self.record_hotkey_btn = QPushButton("录制热键")
+        self.record_hotkey_btn.clicked.connect(self.start_hotkey_recording)
+
+        hotkey_layout.addWidget(self.hotkey_input)
+        hotkey_layout.addWidget(self.record_hotkey_btn)
+
+        layout.addRow("热键:", hotkey_layout)
+
+        # 预设热键下拉框（可选）
+        self.preset_hotkey_combo = QComboBox()
+        self.preset_hotkey_combo.addItems([
+            "Ctrl+C", "Ctrl+V", "Ctrl+X", "Ctrl+Z", "Ctrl+A",
+            "Ctrl+S", "Ctrl+F", "Alt+Tab", "Ctrl+Alt+Del",
+            "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12",
+            "Ctrl+F1", "Ctrl+F2", "Ctrl+F3", "Ctrl+F4", "Ctrl+F5",
+            "Alt+F4", "Ctrl+Shift+Esc"
         ])
-        layout.addRow("热键:", self.hotkey_combo)
+        self.preset_hotkey_combo.currentTextChanged.connect(self.on_preset_hotkey_selected)
+        layout.addRow("预设热键:", self.preset_hotkey_combo)
 
         # 额外延迟（ms）
         self.hotkey_delay_spin = QSpinBox()
@@ -973,7 +1034,94 @@ class StepConfigDialog(QDialog):
         self.hotkey_delay_spin.setSuffix(" ms")
         layout.addRow("执行后延时:", self.hotkey_delay_spin)
 
+        # 存储热键值的隐藏属性
+        self._hotkey_value = ""
+
         return panel
+
+    def on_preset_hotkey_selected(self, text):
+        """处理预设热键选择事件"""
+        if text:
+            self.hotkey_input.setText(text)
+            self._hotkey_value = text  # 同时更新 _hotkey_value
+    def start_hotkey_recording(self):
+        """开始录制热键"""
+        self.record_hotkey_btn.setText("按下热键...")
+        self.record_hotkey_btn.setEnabled(False)
+        self.hotkey_input.clear()
+
+        # 启动热键监听
+        self.hotkey_listener = keyboard.Listener(
+            on_press=self.on_hotkey_press,
+            on_release=self.on_hotkey_release
+        )
+        self.hotkey_listener.start()
+        self.current_keys = set()
+
+    def on_hotkey_press(self, key):
+        """热键按下事件"""
+        self.current_keys.add(key)
+        # 实时显示当前按键组合
+        hotkey_str = self.format_hotkey(self.current_keys)
+        self.hotkey_input.setText(hotkey_str)
+
+    def on_hotkey_release(self, key):
+        """热键释放事件"""
+        # 当所有键都释放时，完成录制
+        if key in self.current_keys:
+            self.current_keys.remove(key)
+
+        if not self.current_keys:  # 所有键都已释放
+            hotkey_str = self.hotkey_input.text()
+            if hotkey_str:
+                self._hotkey_value = hotkey_str
+                self.record_hotkey_btn.setText("录制热键")
+                self.record_hotkey_btn.setEnabled(True)
+                if self.hotkey_listener:
+                    self.hotkey_listener.stop()
+            return False  # 停止监听
+
+    def format_hotkey(self, keys):
+        """格式化按键组合为字符串"""
+        key_names = []
+        for key in keys:
+            if isinstance(key, keyboard.Key):
+                # 特殊键处理
+                name = key.name.upper()
+                if name == "CTRL_L" or name == "CTRL_R":
+                    name = "CTRL"
+                elif name == "ALT_L" or name == "ALT_R":
+                    name = "ALT"
+                elif name == "SHIFT_L" or name == "SHIFT_R":
+                    name = "SHIFT"
+                elif name.startswith("F") and len(name) > 1:
+                    # F1-F12键
+                    pass
+                key_names.append(name)
+            else:
+                # 普通字符键
+                try:
+                    key_names.append(key.char.upper())
+                except AttributeError:
+                    key_names.append(str(key).upper())
+
+        # 排序按键，确保一致的顺序 (CTRL, ALT, SHIFT, 其他键)
+        modifiers = []
+        other_keys = []
+
+        for name in key_names:
+            if name in ["CTRL", "ALT", "SHIFT"]:
+                modifiers.append(name)
+            else:
+                other_keys.append(name)
+
+        # 去重并排序
+        modifiers = list(dict.fromkeys(modifiers))  # 保持顺序的去重
+        other_keys = list(dict.fromkeys(other_keys))  # 保持顺序的去重
+
+        result = modifiers + other_keys
+        return "+".join(result)
+
 
     def capture_region(self):
         parent = self.parent()
@@ -1397,18 +1545,9 @@ class StepConfigDialog(QDialog):
             self.scroll_direction_combo.setCurrentText(params.get("direction", "向下滚动"))
             self.scroll_clicks_spin.setValue(params.get("clicks", 3))
         elif step_type == "键盘热键":
-            hotkey_map = {
-                "ctrl+a": "Ctrl+A  全选",
-                "ctrl+c": "Ctrl+C  复制",
-                "ctrl+v": "Ctrl+V  粘贴",
-                "ctrl+x": "Ctrl+X  剪切",
-                "ctrl+z": "Ctrl+Z  撤销",
-                "ctrl+y": "Ctrl+Y  重做",
-                "ctrl+s": "Ctrl+S  保存",
-                "ctrl+f": "Ctrl+F  查找"
-            }
-            key_str = params.get("hotkey", "").lower()
-            self.hotkey_combo.setCurrentText(hotkey_map.get(key_str, "Ctrl+C  复制"))
+            hotkey = params.get("hotkey", "")
+            self.hotkey_input.setText(hotkey)
+            self._hotkey_value = hotkey
             self.hotkey_delay_spin.setValue(params.get("delay_ms", 100))
 
     def get_step_data(self):
@@ -1466,10 +1605,8 @@ class StepConfigDialog(QDialog):
                 "clicks": self.scroll_clicks_spin.value()
             }
         elif step_type == "键盘热键":
-            hotkey_text = self.hotkey_combo.currentText()  # 例如 "Ctrl+C  复制"
-            key_only = hotkey_text.split()[0]  # 取 "Ctrl+C"
             params = {
-                "hotkey": key_only.lower(),  # 统一存小写，如 "ctrl+c"
+                "hotkey": self._hotkey_value,  # 使用存储的热键值
                 "delay_ms": self.hotkey_delay_spin.value()
             }
         params["step_time"] = datetime.now().strftime("%H:%M:%S")
@@ -1739,6 +1876,7 @@ class AutomationUI(QMainWindow):
 
         # 重复间隔
         schedule_layout.addWidget(QLabel("重复间隔:"), 1, 0)
+        self.repeat_interval = QSpinBox()
         self.repeat_interval = QSpinBox()
         self.repeat_interval.setRange(0, 1440)
         self.repeat_interval.setValue(0)
