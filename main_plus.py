@@ -30,6 +30,7 @@ import os
 from pathlib import Path
 
 from pynput import keyboard
+from pynput.keyboard import KeyCode, Key
 
 
 # 工具函数
@@ -41,7 +42,93 @@ def resource_path(relative_path: str) -> str:
         base_path = os.path.abspath(".")   # 开发环境
     return os.path.join(base_path, relative_path)
 
-# hotkey_listener.py
+
+class WheelTimeEdit(QTimeEdit):
+    """支持鼠标滚轮调整的TimeEdit"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWrapping(True)  # 允许循环滚动
+        self.installEventFilter(self)
+
+    def wheelEvent(self, event):
+        """鼠标滚轮事件"""
+        if not self.hasFocus():
+            return
+
+        delta = event.angleDelta().y()
+        current_section = self.currentSection()
+
+        if current_section == QTimeEdit.HourSection:
+            # 调整小时
+            hours = self.time().hour()
+            if delta > 0:
+                hours = (hours + 1) % 24
+            else:
+                hours = (hours - 1) % 24
+            new_time = QTime(hours, self.time().minute(), self.time().second())
+
+        elif current_section == QTimeEdit.MinuteSection:
+            # 调整分钟
+            minutes = self.time().minute()
+            if delta > 0:
+                minutes = (minutes + 1) % 60
+            else:
+                minutes = (minutes - 1) % 60
+            new_time = QTime(self.time().hour(), minutes, self.time().second())
+
+        elif current_section == QTimeEdit.SecondSection:
+            # 调整秒
+            seconds = self.time().second()
+            if delta > 0:
+                seconds = (seconds + 1) % 60
+            else:
+                seconds = (seconds - 1) % 60
+            new_time = QTime(self.time().hour(), self.time().minute(), seconds)
+
+        else:
+            return
+
+        self.setTime(new_time)
+        event.accept()
+
+
+class WheelSpinBox(QSpinBox):
+    """支持鼠标滚轮调整的SpinBox"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.installEventFilter(self)
+
+    def wheelEvent(self, event):
+        """鼠标滚轮事件"""
+        if not self.hasFocus():
+            return
+
+        delta = event.angleDelta().y()
+        current_value = self.value()
+
+        if delta > 0:
+            # 向上滚动，增加值
+            if current_value < 60:
+                step = 1  # 小数值时步长为1
+            elif current_value < 180:
+                step = 5  # 中等值时步长为5
+            else:
+                step = 30  # 大值时步长为30
+            new_value = min(self.maximum(), current_value + step)
+        else:
+            # 向下滚动，减少值
+            if current_value <= 60:
+                step = 1
+            elif current_value <= 180:
+                step = 5
+            else:
+                step = 30
+            new_value = max(self.minimum(), current_value - step)
+
+        self.setValue(new_value)
+        event.accept()
 
 
 class HotkeyListener(QThread):
@@ -1022,8 +1109,10 @@ class StepConfigDialog(QDialog):
             "Ctrl+S", "Ctrl+F", "Alt+Tab", "Ctrl+Alt+Del",
             "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12",
             "Ctrl+F1", "Ctrl+F2", "Ctrl+F3", "Ctrl+F4", "Ctrl+F5",
-            "Alt+F4", "Ctrl+Shift+Esc"
+            "Alt+F4", "Ctrl+Shift+Esc",'Ctrl+Alt+W'
         ])
+        self.hotkey_input.setText("Ctrl+C")
+        self._hotkey_value = "Ctrl+C"
         self.preset_hotkey_combo.currentTextChanged.connect(self.on_preset_hotkey_selected)
         layout.addRow("预设热键:", self.preset_hotkey_combo)
 
@@ -1035,8 +1124,6 @@ class StepConfigDialog(QDialog):
         layout.addRow("执行后延时:", self.hotkey_delay_spin)
 
         # 存储热键值的隐藏属性
-        self._hotkey_value = ""
-
         return panel
 
     def on_preset_hotkey_selected(self, text):
@@ -1082,46 +1169,44 @@ class StepConfigDialog(QDialog):
             return False  # 停止监听
 
     def format_hotkey(self, keys):
-        """格式化按键组合为字符串"""
-        key_names = []
-        for key in keys:
-            if isinstance(key, keyboard.Key):
-                # 特殊键处理
-                name = key.name.upper()
-                if name == "CTRL_L" or name == "CTRL_R":
-                    name = "CTRL"
-                elif name == "ALT_L" or name == "ALT_R":
-                    name = "ALT"
-                elif name == "SHIFT_L" or name == "SHIFT_R":
-                    name = "SHIFT"
-                elif name.startswith("F") and len(name) > 1:
-                    # F1-F12键
-                    pass
-                key_names.append(name)
-            else:
-                # 普通字符键
-                try:
-                    key_names.append(key.char.upper())
-                except AttributeError:
-                    key_names.append(str(key).upper())
+        """
+        把 pynput 得到的按键列表转成统一字符串，例如：
+        [Key.ctrl, Key.alt, KeyCode.from_char('w')]  ->  'CTRL+ALT+W'
+        """
+        names = []
 
-        # 排序按键，确保一致的顺序 (CTRL, ALT, SHIFT, 其他键)
-        modifiers = []
-        other_keys = []
+        for k in keys:
+            if isinstance(k, Key):
+                # 特殊键：统一大小写并去掉 _l / _r
+                name = {
+                    Key.ctrl_l: 'CTRL',
+                    Key.ctrl_r: 'CTRL',
+                    Key.alt_l: 'ALT',
+                    Key.alt_r: 'ALT',
+                    Key.shift_l: 'SHIFT',
+                    Key.shift_r: 'SHIFT',
+                }.get(k, k.name.upper())
+                names.append(name)
 
-        for name in key_names:
-            if name in ["CTRL", "ALT", "SHIFT"]:
-                modifiers.append(name)
-            else:
-                other_keys.append(name)
+            elif isinstance(k, KeyCode):
+                # 普通字符：优先用 char 字段
+                char = k.char.upper() if k.char else ''
+                if char:
+                    names.append(char)
+                else:
+                    # 功能键、空格、回车等用 vk → 名字映射
+                    try:
+                        names.append(Key.from_vk(k.vk).name.upper())
+                    except ValueError as e:
+                        print(f"无法将按键 {k} 转换为名称：{e}")
 
-        # 去重并排序
-        modifiers = list(dict.fromkeys(modifiers))  # 保持顺序的去重
-        other_keys = list(dict.fromkeys(other_keys))  # 保持顺序的去重
+        # 去重并保持顺序：CTRL/ALT/SHIFT 在前，其余在后
+        modifiers = [n for n in names if n in {'CTRL', 'ALT', 'SHIFT'}]
+        others = [n for n in names if n not in {'CTRL', 'ALT', 'SHIFT'}]
 
-        result = modifiers + other_keys
-        return "+".join(result)
-
+        # 利用 dict.fromkeys 去重并保持首次出现顺序
+        ordered = list(dict.fromkeys(modifiers + others))
+        return '+'.join(ordered)
 
     def capture_region(self):
         parent = self.parent()
@@ -1545,7 +1630,7 @@ class StepConfigDialog(QDialog):
             self.scroll_direction_combo.setCurrentText(params.get("direction", "向下滚动"))
             self.scroll_clicks_spin.setValue(params.get("clicks", 3))
         elif step_type == "键盘热键":
-            hotkey = params.get("hotkey", "")
+            hotkey = params.get("hotkey", "ctrl+c").upper()
             self.hotkey_input.setText(hotkey)
             self._hotkey_value = hotkey
             self.hotkey_delay_spin.setValue(params.get("delay_ms", 100))
@@ -1854,49 +1939,138 @@ class AutomationUI(QMainWindow):
         task_info_layout.addRow("当前状态:", self.task_status)
 
         task_info_group.setLayout(task_info_layout)
-
-        # 定时设置组 - 修改为横向布局
+        # 定时设置组
+        # 定时设置组
         schedule_group = QGroupBox("⏰ 定时设置")
         schedule_layout = QGridLayout()
         schedule_layout.setSpacing(10)
+        schedule_layout.setColumnStretch(5, 1)  # 添加弹性空间
 
         # 执行方式
         schedule_layout.addWidget(QLabel("执行方式:"), 0, 0)
         self.schedule_enable = QComboBox()
         self.schedule_enable.addItems(["立即执行", "定时执行"])
-        self.schedule_enable.setMinimumWidth(100)
+        self.schedule_enable.setMinimumWidth(120)
+        self.schedule_enable.currentTextChanged.connect(self.on_schedule_mode_changed)
         schedule_layout.addWidget(self.schedule_enable, 0, 1)
 
-        # 执行时间
+        # 执行时间 - 支持鼠标滚轮
         schedule_layout.addWidget(QLabel("执行时间:"), 0, 2)
-        self.schedule_time = QTimeEdit(QTime.currentTime())
-        self.schedule_time.setDisplayFormat("HH:mm:ss")
-        self.schedule_time.setMinimumWidth(90)
-        schedule_layout.addWidget(self.schedule_time, 0, 3)
+        time_widget = QWidget()
+        time_layout = QHBoxLayout(time_widget)
+        time_layout.setContentsMargins(0, 0, 0, 0)
+        time_layout.setSpacing(5)
 
-        # 重复间隔
+        self.schedule_time = WheelTimeEdit(QTime.currentTime().addSecs(300))  # 自定义支持滚轮的TimeEdit
+        self.schedule_time.setDisplayFormat("HH:mm:ss")
+        self.schedule_time.setMinimumWidth(100)
+        self.schedule_time.setMaximumWidth(100)
+        self.schedule_time.setTimeRange(QTime(0, 0, 0), QTime(23, 59, 59))
+        self.schedule_time.setToolTip("使用鼠标滚轮调整时间\n单击可分别编辑时、分、秒")
+        time_layout.addWidget(self.schedule_time)
+
+        # 时间快捷按钮
+        time_buttons = []
+        time_presets = [
+           ("5分钟后", 5) ,("2小时后", 120)
+        ]
+
+        for text, minutes in time_presets:
+            btn = QPushButton(text)
+            btn.setFixedSize(60, 25)
+            btn.setStyleSheet("""
+                QPushButton { 
+                    font-size: 10px; 
+                    padding: 2px; 
+                }
+                QPushButton:hover {
+                    background-color: #e0e0e0;
+                }
+            """)
+            btn.clicked.connect(lambda checked, m=minutes: self.add_minutes_to_time(m))
+            time_buttons.append(btn)
+            time_layout.addWidget(btn)
+
+        # time_layout.addStretch()
+        schedule_layout.addWidget(time_widget, 0, 3, 1, 2)
+
+        # 重复间隔 - 支持鼠标滚轮
         schedule_layout.addWidget(QLabel("重复间隔:"), 1, 0)
-        self.repeat_interval = QSpinBox()
-        self.repeat_interval = QSpinBox()
+        interval_widget = QWidget()
+        interval_layout = QHBoxLayout(interval_widget)
+        interval_layout.setContentsMargins(0, 0, 0, 0)
+        interval_layout.setSpacing(5)
+
+        self.repeat_interval = WheelSpinBox()  # 自定义支持滚轮的SpinBox
         self.repeat_interval.setRange(0, 1440)
         self.repeat_interval.setValue(0)
-        self.repeat_interval.setMinimumWidth(60)
-        schedule_layout.addWidget(self.repeat_interval, 1, 1)
-        schedule_layout.addWidget(QLabel("分钟(24h=1440m)"), 1, 2)
+        self.repeat_interval.setMinimumWidth(80)
+        self.repeat_interval.setMaximumWidth(80)
+        self.repeat_interval.setSuffix(" 分钟")
+        self.repeat_interval.setSpecialValueText("不重复")
+        self.repeat_interval.setToolTip("使用鼠标滚轮调整间隔\n0表示不重复")
+        self.repeat_interval.valueChanged.connect(self.update_next_run_time)
+        interval_layout.addWidget(self.repeat_interval)
+        # 间隔快捷按钮
+        interval_buttons = []
+        interval_presets = [
+            ("不重复", 0), ("24小时", 1440)
+        ]
+
+        for text, interval in interval_presets:
+            btn = QPushButton(text)
+            btn.setFixedSize(55, 25)
+            btn.setStyleSheet("""
+                QPushButton { 
+                    font-size: 10px; 
+                    padding: 2px; 
+                }
+                QPushButton:hover {
+                    background-color: #e0e0e0;
+                }
+            """)
+            btn.clicked.connect(lambda checked, i=interval: self.repeat_interval.setValue(i))
+            interval_buttons.append(btn)
+            interval_layout.addWidget(btn)
+
+        interval_layout.addStretch()
+        schedule_layout.addWidget(interval_widget, 1, 1, 1, 2)
 
         # 重复次数
         schedule_layout.addWidget(QLabel("重复次数:"), 1, 3)
         self.repeat_count = QComboBox()
         self.repeat_count.addItems(["1", "3", "5", "10", "无限"])
         self.repeat_count.setCurrentIndex(0)
+        self.repeat_count.setMinimumWidth(80)
+        self.repeat_count.currentTextChanged.connect(self.update_next_run_time)
         schedule_layout.addWidget(self.repeat_count, 1, 4)
 
-        # 应用定时设置按钮
-        self.apply_schedule_btn = QPushButton("应用定时设置")
-        schedule_layout.addWidget(self.apply_schedule_btn, 2, 0, 1, 5)
+        # 下一次执行时间显示
+        self.next_run_label = QLabel("下次执行: -")
+        self.next_run_label.setStyleSheet("""
+            QLabel {
+                color: #2c5aa0; 
+                font-size: 11px; 
+                padding: 8px;
+                background-color: #f0f8ff;
+                border-radius: 5px;
+                border: 1px solid #d0e0f0;
+                margin: 2px;
+            }
+        """)
+        self.next_run_label.setAlignment(Qt.AlignCenter)
+        self.next_run_label.setWordWrap(True)
+        schedule_layout.addWidget(self.next_run_label, 0, 5, 2, 5)
+
+        # 连接信号
+        self.schedule_time.timeChanged.connect(self.update_next_run_time)
+        self.repeat_interval.valueChanged.connect(self.update_next_run_time)
 
         schedule_group.setLayout(schedule_layout)
 
+        # 初始化状态
+        self.update_next_run_time()
+        self.on_schedule_mode_changed("立即执行")
         # 步骤配置区域
         steps_group = QGroupBox("⚙️ 操作步骤配置")
         steps_layout = QVBoxLayout()
@@ -1997,7 +2171,7 @@ class AutomationUI(QMainWindow):
         self.move_up_btn.clicked.connect(self.move_step_up)
         self.move_down_btn.clicked.connect(self.move_step_down)
         self.save_btn.clicked.connect(self.save_task_config)
-        self.apply_schedule_btn.clicked.connect(self.apply_schedule)
+        # self.apply_schedule_btn.clicked.connect(self.apply_schedule)
         self.copy_step_btn.clicked.connect(self.copy_step)
 
         # 应用当前主题
@@ -2008,6 +2182,121 @@ class AutomationUI(QMainWindow):
 
         # 创建系统托盘图标
         self.create_system_tray()
+
+    def on_schedule_mode_changed(self, mode):
+        """执行方式改变时的处理"""
+        is_scheduled = mode == "定时执行"
+
+        # 启用/禁用相关控件
+        self.schedule_time.setEnabled(is_scheduled)
+        self.repeat_interval.setEnabled(is_scheduled)
+        self.repeat_count.setEnabled(is_scheduled)
+
+        # 启用/禁用快捷按钮
+        for widget in self.findChildren(QPushButton):
+            if widget.text().endswith('m'):
+                widget.setEnabled(is_scheduled)
+
+        # 更新提示
+        if is_scheduled:
+            self.update_next_run_time()
+        else:
+            self.next_run_label.setText("立即执行模式")
+            self.next_run_label.setStyleSheet("""
+                QLabel {
+                    color: #666; 
+                    font-size: 11px; 
+                    padding: 5px;
+                    background-color: #f8f8f8;
+                    border-radius: 3px;
+                    border: 1px solid #e0e0e0;
+                }
+            """)
+
+    def add_minutes_to_time(self, minutes):
+        """在当前时间基础上添加分钟数"""
+        if minutes == 0:
+            # 设置为当前时间
+            current_time = QTime.currentTime()
+            self.schedule_time.setTime(current_time)
+        else:
+            current_time = self.schedule_time.time()
+            new_time = current_time.addSecs(minutes * 60)
+            self.schedule_time.setTime(new_time)
+
+    def update_next_run_time(self):
+        """更新下一次执行时间显示"""
+        if self.schedule_enable.currentText() != "定时执行":
+            self.next_run_label.setText("立即执行模式")
+            self.next_run_label.setStyleSheet("""
+                QLabel {
+                    color: #666; 
+                    font-size: 11px; 
+                    padding: 8px;
+                    background-color: #f8f8f8;
+                    border-radius: 5px;
+                    border: 1px solid #e0e0e0;
+                    margin: 2px;
+                }
+            """)
+            return
+
+        schedule_time = self.schedule_time.time()
+        interval = self.repeat_interval.value()
+        repeat_type = self.repeat_count.currentText()
+
+        now = QTime.currentTime()
+        current_date = QDate.currentDate()
+        next_run = QTime(schedule_time.hour(), schedule_time.minute(), schedule_time.second())
+
+        # 计算下一次执行日期时间
+        if next_run < now:
+            # 如果今天的时间已过，则明天执行
+            next_date = current_date.addDays(1)
+        else:
+            next_date = current_date
+
+        next_run_datetime = QDateTime(next_date, next_run)
+        next_run_str = next_run_datetime.toString("yyyy-MM-dd HH:mm:ss")
+
+        if interval > 0:
+            if repeat_type == "无限":
+                message = f"下次执行: {next_run_str}\n每 {interval} 分钟重复，无限次"
+                color = "#2c5aa0"
+            else:
+                message = f"下次执行: {next_run_str}\n每 {interval} 分钟重复，共 {repeat_type} 次"
+                color = "#2c5aa0"
+        else:
+            message = f"下次执行: {next_run_str}\n单次执行"
+            color = "#666666"
+
+        self.next_run_label.setText(message)
+        self.next_run_label.setStyleSheet(f"""
+            QLabel {{
+                color: {color}; 
+                font-size: 11px; 
+                padding: 8px;
+                background-color: #f0f8ff;
+                border-radius: 5px;
+                border: 1px solid #d0e0f0;
+                margin: 2px;
+            }}
+        """)
+
+    def validate_schedule_settings(self):
+        """验证定时设置是否有效"""
+        interval = self.repeat_interval.value()
+
+        if interval < 0 or interval > 1440:
+            QMessageBox.warning(self, "无效设置", "重复间隔必须在0-1440分钟之间")
+            return False
+
+        schedule_time = self.schedule_time.time()
+        if not schedule_time.isValid():
+            QMessageBox.warning(self, "无效时间", "请选择有效的执行时间")
+            return False
+
+        return True
     def setup_hotkey_listener(self):
         """启动 Esc 热键监听"""
         self.hotkey_listener = HotkeyListener(self)
@@ -2367,7 +2656,7 @@ class AutomationUI(QMainWindow):
           """)
 
         # 连接菜单信号
-        new_action.triggered.connect(self.create_new_task)
+        # new_action.triggered.connect(self.create_new_task)
         save_action.triggered.connect(self.save_task_config)
         export_action.triggered.connect(self.export_config)
         import_action.triggered.connect(self.import_config)
@@ -2555,7 +2844,7 @@ class AutomationUI(QMainWindow):
                     self.scheduled_timers[name].stop()
                     del self.scheduled_timers[name]
                 del self.tasks[name]
-            print(f"已删除任务: {name}")
+            # print(f"已删除任务: {name}")
             self.on_log_message(name, f"🗑️ 已删除任务：{name}")
 
     def task_selected(self, current, previous):
@@ -2634,6 +2923,164 @@ class AutomationUI(QMainWindow):
         if not self.current_task:
             return
 
+        # 检查是否有定时设置
+        schedule_type = self.schedule_enable.currentText()
+        if schedule_type != "立即执行":
+            # 验证定时设置
+            if not self.validate_schedule_settings():
+                return
+            # 处理定时执行逻辑
+            task_name = self.current_task
+
+            # 如果任务已有定时器，先停止
+            if task_name in self.scheduled_timers:
+                self.scheduled_timers[task_name].stop()
+                del self.scheduled_timers[task_name]
+
+            # 获取定时设置
+            schedule_time = self.schedule_time.time()
+            interval_minutes = self.repeat_interval.value()
+            repeat_count = self.repeat_count.currentText()
+
+            # 计算第一次执行的时间
+            now = QTime.currentTime()
+            first_run = QTime(schedule_time.hour(), schedule_time.minute(), schedule_time.second())
+
+            # 如果当前时间已超过设定时间，则明天执行
+            if first_run < now:
+                first_run = first_run.addSecs(24 * 3600)  # 加一天
+
+            # 计算延迟时间（毫秒）
+            delay_ms = now.msecsTo(first_run)
+
+            # 更新UI状态为等待定时
+            self.start_current_btn.setEnabled(False)
+            self.stop_current_btn.setEnabled(True)
+            self.task_status.setText("等待定时")
+
+            # 更新任务列表中的状态
+            for i in range(self.task_list.count()):
+                item = self.task_list.item(i)
+                widget = self.task_list.itemWidget(item)
+                if widget and widget.task_name == self.current_task:
+                    widget.status_label.setText("等待定时")
+                    widget.start_btn.setEnabled(False)
+                    widget.stop_btn.setEnabled(True)
+                    break
+
+            # 创建首次执行的定时器
+            initial_timer = QTimer(self)
+            initial_timer.setSingleShot(True)  # 只执行一次
+
+            def run_initial_task():
+                # 执行倒计时并运行任务
+                self.run_task_with_countdown(task_name)
+
+                # 如果需要重复执行，设置重复定时器
+                if repeat_count == "无限":
+                    repeat_timer = QTimer(self)
+
+                    def run_repeat_with_countdown():
+                        self.run_task_with_countdown(task_name)
+
+                    repeat_timer.timeout.connect(run_repeat_with_countdown)
+                    repeat_timer.setInterval(interval_minutes * 60 * 1000)  # 转换为毫秒
+                    repeat_timer.start()
+                    # 保存重复定时器引用
+                    self.scheduled_timers[task_name] = repeat_timer
+
+                elif repeat_count != "1":
+                    try:
+                        total_count = int(repeat_count)
+                        current_count = [1]  # 使用列表以便在闭包中修改
+
+                        if current_count[0] < total_count:
+                            repeat_timer = QTimer(self)
+
+                            def run_repeat_with_countdown():
+                                self.run_task_with_countdown(task_name)
+                                current_count[0] += 1
+                                if current_count[0] >= total_count:
+                                    repeat_timer.stop()
+                                    if task_name in self.scheduled_timers:
+                                        del self.scheduled_timers[task_name]
+
+                            repeat_timer.timeout.connect(run_repeat_with_countdown)
+                            repeat_timer.setInterval(interval_minutes * 60 * 1000)
+                            repeat_timer.start()
+                            # 保存重复定时器引用
+                            self.scheduled_timers[task_name] = repeat_timer
+                    except ValueError:
+                        pass  # 无效的重复次数
+
+            initial_timer.timeout.connect(run_initial_task)
+            initial_timer.start(delay_ms)
+
+            # 保存定时器引用
+            self.scheduled_timers[task_name] = initial_timer
+
+            # 显示提示信息
+            first_run_str = first_run.toString('HH:mm:ss')
+            self.log_text.appendPlainText(
+                f"[{time.strftime('%H:%M:%S')}] 已设置定时任务: {task_name} 将在 {first_run_str} 执行")
+
+            # 显示状态栏信息
+            self.statusBar().showMessage(f"定时任务已设置，将在 {first_run_str} 执行")
+
+            QMessageBox.information(self, "定时成功",
+                                    f"[{time.strftime('%H:%M:%S')}] 已设置定时任务: {task_name} 将在 {first_run_str} 执行\n请保持桌面处于从不熄屏状态")
+
+            return  # 如果是定时执行，直接返回，不立即执行任务
+
+        # 立即执行任务的逻辑
+        self.execute_task_immediately()
+
+    def run_task_with_countdown(self, task_name):
+        """执行带倒计时的任务"""
+        # 创建倒计时定时器
+        countdown_timer = QTimer(self)
+        countdown_seconds = 10
+        countdown_timer.setInterval(1000)  # 每秒触发一次
+
+        def update_countdown():
+            nonlocal countdown_seconds
+            current_time = time.strftime('%H:%M:%S')  # 获取当前时间
+            if countdown_seconds > 0:
+                self.statusBar().showMessage(
+                    f"[{current_time}] 任务 '{task_name}' 即将执行: {countdown_seconds}秒"
+                )
+                countdown_seconds -= 1
+            else:
+                countdown_timer.stop()
+                current_time = time.strftime('%H:%M:%S')  # 再次获取当前时间
+                self.statusBar().showMessage(
+                    f"[{current_time}] 任务 '{task_name}' 开始执行"
+                )
+                # 实际执行任务
+                self.execute_task_immediately()
+
+        # 启动倒计时
+        countdown_timer.timeout.connect(update_countdown)
+        countdown_timer.start()
+
+        # 立即更新一次倒计时显示
+        current_time = time.strftime('%H:%M:%S')
+        self.statusBar().showMessage(
+            f"[{current_time}] 任务 '{task_name}' 即将执行: {countdown_seconds}秒"
+        )
+
+        # 保存倒计时定时器引用以便可以停止
+        if not hasattr(self, 'countdown_timers'):
+            self.countdown_timers = {}
+        self.countdown_timers[task_name] = countdown_timer
+    def execute_task_immediately(self):
+        """立即执行任务的公共方法"""
+        if not self.current_task:
+            return
+
+        # 清除状态栏的倒计时信息
+        self.statusBar().showMessage("任务开始执行")
+
         # 获取任务配置
         task_config = self.tasks.get(self.current_task, {})
         steps = task_config.get("steps", [])
@@ -2641,6 +3088,7 @@ class AutomationUI(QMainWindow):
         if not steps:
             QMessageBox.warning(self, "无法启动", "当前任务没有配置任何步骤")
             return
+
         auto_skip = self.auto_skip_checkbox.isChecked()  # ✅ 读取 QCheckBox 状态
         timeout = self.timeout_spinbox.value()  # 获取用户设置的超时时间
         instant_click = self.instant_click_checkbox.isChecked()
@@ -2694,24 +3142,77 @@ class AutomationUI(QMainWindow):
         self.showMinimized()
 
     def stop_current_task(self):
+        # 停止当前运行的任务
         if self.task_runner and self.task_runner.is_running:
             self.task_runner.stop()
 
-            # 更新UI状态
-            self.start_current_btn.setEnabled(True)
-            self.stop_current_btn.setEnabled(False)
-            self.task_status.setText("已停止")
+        # 停止当前任务的定时器（如果有）
+        if self.current_task and self.current_task in self.scheduled_timers:
+            timer = self.scheduled_timers[self.current_task]
+            if timer and timer.isActive():
+                timer.stop()
+            del self.scheduled_timers[self.current_task]
 
-            # 更新任务列表中的状态
-            for i in range(self.task_list.count()):
-                item = self.task_list.item(i)
-                widget = self.task_list.itemWidget(item)
-                if widget and widget.task_name == self.current_task:
-                    widget.status_label.setText("已停止")
-                    widget.start_btn.setEnabled(True)
-                    widget.stop_btn.setEnabled(False)
-                    break
+        # 停止当前任务的倒计时（如果有）
+        if hasattr(self, 'countdown_timers') and self.current_task in self.countdown_timers:
+            countdown_timer = self.countdown_timers[self.current_task]
+            if countdown_timer and countdown_timer.isActive():
+                countdown_timer.stop()
+            del self.countdown_timers[self.current_task]
 
+            # 记录日志
+            self.log_text.appendPlainText(
+                f"[{time.strftime('%H:%M:%S')}] 已取消定时任务: {self.current_task}")
+
+        # 更新UI状态
+        self.start_current_btn.setEnabled(True)
+        self.stop_current_btn.setEnabled(False)
+        self.task_status.setText("已停止")
+
+        # 清除状态栏的倒计时信息
+        self.statusBar().showMessage("任务已停止")
+
+        # 更新任务列表中的状态
+        for i in range(self.task_list.count()):
+            item = self.task_list.item(i)
+            widget = self.task_list.itemWidget(item)
+            if widget and widget.task_name == self.current_task:
+                widget.status_label.setText("已停止")
+                widget.start_btn.setEnabled(True)
+                widget.stop_btn.setEnabled(False)
+                break
+
+        # 恢复窗口显示（如果之前最小化了）
+        self.showNormal()
+    def cleanup_scheduled_timers(self):
+        """清理无效的定时器"""
+        tasks_to_remove = []
+        for task_name, timer in self.scheduled_timers.items():
+            if timer is None or not timer.isActive():
+                tasks_to_remove.append(task_name)
+
+        for task_name in tasks_to_remove:
+            del self.scheduled_timers[task_name]
+
+        if tasks_to_remove:
+            self.log_text.appendPlainText(
+                f"[{time.strftime('%H:%M:%S')}] 清理了 {len(tasks_to_remove)} 个无效定时器")
+    def stop_all_scheduled_tasks(self):
+        """停止所有定时任务"""
+        tasks_stopped = []
+        for task_name, timer in list(self.scheduled_timers.items()):
+            if timer and timer.isActive():
+                timer.stop()
+                tasks_stopped.append(task_name)
+
+        # 清空定时器字典
+        self.scheduled_timers.clear()
+
+        # 记录日志
+        if tasks_stopped:
+            self.log_text.appendPlainText(
+                f"[{time.strftime('%H:%M:%S')}] 已停止所有定时任务: {', '.join(tasks_stopped)}")
+            self.statusBar().showMessage(f"已停止 {len(tasks_stopped)} 个定时任务")
     def closeEvent(self, event):
         # 清理热键监听
         if self.hotkey_listener and self.hotkey_listener.isRunning():
@@ -3049,21 +3550,6 @@ class AutomationUI(QMainWindow):
                 QPushButton:hover {
                     background-color: #388E3C;
                 }
-            """)
-
-            self.apply_schedule_btn.setStyleSheet("""
-QPushButton {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                stop:0 #f5f5f5, stop:0.5 #e8f5e9, stop:1 #c8e6c9);
-    border: 1px solid #a5d6a7;
-    color: #004d40;
-    padding: 5px;
-    border-radius: 4px;
-}
-QPushButton:hover {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                stop:0 #e8f5e9, stop:0.5 #c8e6c9, stop:1 #a5d6a7);
-}
             """)
 
             self.clear_log_btn.setStyleSheet("""
@@ -3469,7 +3955,7 @@ QPushButton:hover {
         def run_initial_task():
             # 执行任务
             self.start_current_task()
-            
+
             # 如果需要重复执行，设置重复定时器
             if repeat_count == "无限":
                 repeat_timer = QTimer(self)
@@ -3482,10 +3968,10 @@ QPushButton:hover {
                 try:
                     total_count = int(repeat_count)
                     current_count = 1  # 第一次已经执行
-                    
+
                     if current_count < total_count:
                         repeat_timer = QTimer(self)
-                        
+
                         def run_repeat_task():
                             nonlocal current_count
                             self.start_current_task()
@@ -3494,7 +3980,7 @@ QPushButton:hover {
                                 repeat_timer.stop()
                                 if task_name in self.scheduled_timers:
                                     del self.scheduled_timers[task_name]
-                        
+
                         repeat_timer.timeout.connect(run_repeat_task)
                         repeat_timer.setInterval(interval_minutes * 60 * 1000)
                         repeat_timer.start()
@@ -3540,10 +4026,3 @@ if __name__ == "__main__":
     window.setWindowIcon(ATIcon.icon())
     window.show()
     sys.exit(app.exec())
-
-    # app = QApplication(sys.argv)  # 必须初始化
-    # ok = ATIcon.pixmap().save("icon.ico", "ICO")
-    # if ok:
-    #     print("✅ icon.ico 已生成！")
-    # else:
-    #     print("❌ 保存失败")
