@@ -851,9 +851,10 @@ class TaskRunner(QObject):
             raise
 
     def execute_keyboard_input(self, params):
+        from datetime import datetime, date, time
         # 1. 纯文本优先
         text = params.get("text", "").strip()
-        if not text:
+        if not text or '个1314' in text:
             # 2. 动态纪念日文案
             love_str = params.get("love_date")
             if love_str:
@@ -933,14 +934,13 @@ class TaskRunner(QObject):
 
                 else:  # 随机
                     text = random.choice(cells)
-
         self._send_text(str(text))
 
     def _send_text(self, text: str):
         """真正执行文本输入的公共逻辑"""
         self.log_message.emit(self.task_name, f"⌨️ 文本输入: '{text}'")
         try:
-            import pyperclip, pyautogui, time
+            import pyperclip
             pyperclip.copy(text)
             pyautogui.hotkey('ctrl', 'v')
             time.sleep(0.5)
@@ -1109,7 +1109,7 @@ class StepConfigDialog(QDialog):
             "Ctrl+S", "Ctrl+F", "Alt+Tab", "Ctrl+Alt+Del",
             "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12",
             "Ctrl+F1", "Ctrl+F2", "Ctrl+F3", "Ctrl+F4", "Ctrl+F5",
-            "Alt+F4", "Ctrl+Shift+Esc",'Ctrl+Alt+W'
+            "Alt+F4", "Ctrl+Shift+Esc",'Ctrl+Alt+W','Ctrl+Alt+S','Enter','Backspace','Tab'
         ])
         self.hotkey_input.setText("Ctrl+C")
         self._hotkey_value = "Ctrl+C"
@@ -1147,6 +1147,17 @@ class StepConfigDialog(QDialog):
 
     def on_hotkey_press(self, key):
         """热键按下事件"""
+        # ========== 新增开始 ==========
+        # Windows 把 Ctrl+字母 变成控制字符，这里还原成字母
+        if (isinstance(key, KeyCode) and key.char and
+                '\x00' <= key.char <= '\x1F' and
+                Key.ctrl_l in self.current_keys or Key.ctrl_r in self.current_keys):
+            # 还原成 Ctrl+字母
+            letter = chr(ord(key.char) + 64)  # 0x01 -> 'A'
+            self.current_keys.add(KeyCode.from_char(letter.lower()))
+            # 不再把原始 \x01 放进集合
+            return
+        # ========== 新增结束 ==========
         self.current_keys.add(key)
         # 实时显示当前按键组合
         hotkey_str = self.format_hotkey(self.current_keys)
@@ -1157,7 +1168,7 @@ class StepConfigDialog(QDialog):
         # 当所有键都释放时，完成录制
         if key in self.current_keys:
             self.current_keys.remove(key)
-
+            print(self.current_keys)
         if not self.current_keys:  # 所有键都已释放
             hotkey_str = self.hotkey_input.text()
             if hotkey_str:
@@ -1185,6 +1196,9 @@ class StepConfigDialog(QDialog):
                     Key.alt_r: 'ALT',
                     Key.shift_l: 'SHIFT',
                     Key.shift_r: 'SHIFT',
+                    Key.cmd: 'WIN',  # ← 新增这一行
+                    Key.cmd_r: 'WIN',  # 右Win 保险起见也写上
+                    Key.cmd_l: 'WIN',  # 左Win 保险起见也写上
                 }.get(k, k.name.upper())
                 names.append(name)
 
@@ -1201,8 +1215,8 @@ class StepConfigDialog(QDialog):
                         print(f"无法将按键 {k} 转换为名称：{e}")
 
         # 去重并保持顺序：CTRL/ALT/SHIFT 在前，其余在后
-        modifiers = [n for n in names if n in {'CTRL', 'ALT', 'SHIFT'}]
-        others = [n for n in names if n not in {'CTRL', 'ALT', 'SHIFT'}]
+        modifiers = [n for n in names if n in {'CTRL', 'ALT', 'SHIFT','WIN'}]
+        others = [n for n in names if n not in {'CTRL', 'ALT', 'SHIFT','WIN'}]
 
         # 利用 dict.fromkeys 去重并保持首次出现顺序
         ordered = list(dict.fromkeys(modifiers + others))
@@ -1395,9 +1409,10 @@ class StepConfigDialog(QDialog):
         self.use_love_checkbox.toggled.connect(self.love_datetime_edit.setEnabled)
 
         h_layout.addWidget(self.love_datetime_edit)
-
         # 4. 生成按钮
         gen_btn = QPushButton("生成文案")
+        gen_btn.setEnabled(False)
+        self.use_love_checkbox.toggled.connect(gen_btn.setEnabled)  # 勾选/取消自动启用/禁用
         gen_btn.clicked.connect(self.generate_love_text)
         h_layout.addWidget(gen_btn)
 
@@ -1653,7 +1668,6 @@ class StepConfigDialog(QDialog):
             love_date_str = ""
             if use_love:
                 love_date_str = self.love_datetime_edit.dateTime().toPython().isoformat()
-
             params = {
                 "text": self.text_edit.toPlainText().strip(),
                 "excel_path": self.excel_path_edit.text().strip(),
@@ -1695,6 +1709,7 @@ class StepConfigDialog(QDialog):
                 "delay_ms": self.hotkey_delay_spin.value()
             }
         params["step_time"] = datetime.now().strftime("%H:%M:%S")
+        print(f"步骤数据: {params}")
         return {
             "type": step_type,
             "params": params,
@@ -1824,7 +1839,7 @@ class AutomationUI(QMainWindow):
         super().__init__()
         self.setWindowTitle("自动化任务管理器")
 
-        self.setGeometry(100, 100, 1000, 550)  # 减少高度
+        self.setGeometry(100, 100, 1100, 550)  # 减少高度
 
         # 应用设置
         self.settings = QSettings("MyCompany", "AutomationManager")
@@ -2039,7 +2054,7 @@ class AutomationUI(QMainWindow):
         # 重复次数
         schedule_layout.addWidget(QLabel("重复次数:"), 1, 3)
         self.repeat_count = QComboBox()
-        self.repeat_count.addItems(["1", "3", "5", "10", "无限"])
+        self.repeat_count.addItems(["1", "2","3","4", "5","6" ,"7","8","9","10", "无限"])
         self.repeat_count.setCurrentIndex(0)
         self.repeat_count.setMinimumWidth(80)
         self.repeat_count.currentTextChanged.connect(self.update_next_run_time)
@@ -2956,14 +2971,14 @@ class AutomationUI(QMainWindow):
             # 更新UI状态为等待定时
             self.start_current_btn.setEnabled(False)
             self.stop_current_btn.setEnabled(True)
-            self.task_status.setText("等待定时")
+            self.task_status.setText("定时执行中")
 
             # 更新任务列表中的状态
             for i in range(self.task_list.count()):
                 item = self.task_list.item(i)
                 widget = self.task_list.itemWidget(item)
                 if widget and widget.task_name == self.current_task:
-                    widget.status_label.setText("等待定时")
+                    widget.status_label.setText("定时执行中")
                     widget.start_btn.setEnabled(False)
                     widget.stop_btn.setEnabled(True)
                     break
