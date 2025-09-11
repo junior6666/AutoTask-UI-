@@ -2972,7 +2972,7 @@ class AutomationUI(QMainWindow):
 
             # 如果当前时间已超过设定时间，则明天执行
             if first_run < now:
-                first_run = first_run.addSecs(24 * 3600).addSecs(-10)  # 加一天
+                first_run = first_run.addSecs(24 * 3600).addSecs(-10)  # 加一天 -10秒
 
             # 计算延迟时间（毫秒）
             delay_ms = now.msecsTo(first_run)
@@ -3044,7 +3044,8 @@ class AutomationUI(QMainWindow):
             self.scheduled_timers[task_name] = initial_timer
 
             # 显示提示信息
-            first_run_str = first_run.addSecs(10).toString('HH:mm:ss')
+            first_run_1 = first_run.addSecs(10)
+            first_run_str = first_run_1.toString('HH:mm:ss')
             self.log_text.appendPlainText(
                 f"[{time.strftime('%H:%M:%S')}] 已设置定时任务: {task_name} 将在 {first_run_str} 执行")
 
