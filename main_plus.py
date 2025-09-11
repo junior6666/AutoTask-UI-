@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QTime, QSize, QSettings, Signal, QObject, QTimer, QPointF, QRectF, QDate, QDateTime, \
     QPoint, QRect, QThread, Slot
 from PySide6.QtGui import QIcon, QAction, QFont, QPalette, QColor, QLinearGradient, QTextCursor, QKeySequence, QPixmap, \
-    QBrush, QPainterPath, QPainter, QPen, QMouseEvent
+    QBrush, QPainterPath, QPainter, QPen, QMouseEvent, QIntValidator
 
 import os
 from pathlib import Path
@@ -1905,8 +1905,7 @@ class AutomationUI(QMainWindow):
         self.task_list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.task_list.customContextMenuRequested.connect(self.show_context_menu)
 
-        # 添加已有任务
-        self.load_all_configs("config")
+
 
         left_layout.addWidget(self.task_list)
 
@@ -1955,7 +1954,6 @@ class AutomationUI(QMainWindow):
 
         task_info_group.setLayout(task_info_layout)
         # 定时设置组
-        # 定时设置组
         schedule_group = QGroupBox("⏰ 定时设置")
         schedule_layout = QGridLayout()
         schedule_layout.setSpacing(10)
@@ -1987,10 +1985,11 @@ class AutomationUI(QMainWindow):
         # 时间快捷按钮
         time_buttons = []
         time_presets = [
-           ("5分钟后", 5) ,("2小时后", 120)
+            ("13:14", (13, 14)),  # 13:14 时间
+            ("晚安时间", (0, 0))  # 0点时间
         ]
 
-        for text, minutes in time_presets:
+        for text, time_values in time_presets:
             btn = QPushButton(text)
             btn.setFixedSize(60, 25)
             btn.setStyleSheet("""
@@ -2002,9 +2001,16 @@ class AutomationUI(QMainWindow):
                     background-color: #e0e0e0;
                 }
             """)
-            btn.clicked.connect(lambda checked, m=minutes: self.add_minutes_to_time(m))
+            # 根据按钮文本设置不同的点击行为
+            if text == "13:14":
+                btn.clicked.connect(lambda checked, h=time_values[0], m=time_values[1]: self.set_time_to(h, m))
+            elif text == "晚安时间":
+                btn.clicked.connect(lambda checked, h=time_values[0], m=time_values[1]: self.set_time_to(h, m))
             time_buttons.append(btn)
             time_layout.addWidget(btn)
+
+        # 需要在类中添加以下方法
+
 
         # time_layout.addStretch()
         schedule_layout.addWidget(time_widget, 0, 3, 1, 2)
@@ -2022,14 +2028,14 @@ class AutomationUI(QMainWindow):
         self.repeat_interval.setMinimumWidth(80)
         self.repeat_interval.setMaximumWidth(80)
         self.repeat_interval.setSuffix(" 分钟")
-        self.repeat_interval.setSpecialValueText("不重复")
-        self.repeat_interval.setToolTip("使用鼠标滚轮调整间隔\n0表示不重复")
+        self.repeat_interval.setSpecialValueText("")
+        self.repeat_interval.setToolTip("使用鼠标滚轮调整间隔\n")
         self.repeat_interval.valueChanged.connect(self.update_next_run_time)
         interval_layout.addWidget(self.repeat_interval)
         # 间隔快捷按钮
         interval_buttons = []
         interval_presets = [
-            ("不重复", 0), ("24小时", 1440)
+            ("0分钟", 0), ("24小时", 1440)
         ]
 
         for text, interval in interval_presets:
@@ -2054,10 +2060,16 @@ class AutomationUI(QMainWindow):
         # 重复次数
         schedule_layout.addWidget(QLabel("重复次数:"), 1, 3)
         self.repeat_count = QComboBox()
-        self.repeat_count.addItems(["1", "2","3","4", "5","6" ,"7","8","9","10", "无限"])
+        self.repeat_count.setEditable(True)  # 设置为可编辑
+        self.repeat_count.addItems(["1", "3", "7","9", "无限"])
         self.repeat_count.setCurrentIndex(0)
         self.repeat_count.setMinimumWidth(80)
         self.repeat_count.currentTextChanged.connect(self.update_next_run_time)
+        # 添加输入验证器，只允许输入数字或"无限"
+        validator = QIntValidator(1, 999999)  # 允许输入1到999999的整数
+        self.repeat_count.setValidator(validator)
+        self.repeat_count.editTextChanged.connect(self.on_repeat_count_edited)
+
         schedule_layout.addWidget(self.repeat_count, 1, 4)
 
         # 下一次执行时间显示
@@ -2198,19 +2210,25 @@ class AutomationUI(QMainWindow):
         # 创建系统托盘图标
         self.create_system_tray()
 
+        # 添加已有任务
+        self.load_all_configs("config")
+    def set_time_to(self, hour, minute):
+        """设置时间为指定的小时和分钟"""
+        current_time = QTime(hour, minute, 0)
+        self.schedule_time.setTime(current_time)
     def on_schedule_mode_changed(self, mode):
         """执行方式改变时的处理"""
         is_scheduled = mode == "定时执行"
 
-        # 启用/禁用相关控件
-        self.schedule_time.setEnabled(is_scheduled)
-        self.repeat_interval.setEnabled(is_scheduled)
-        self.repeat_count.setEnabled(is_scheduled)
-
-        # 启用/禁用快捷按钮
-        for widget in self.findChildren(QPushButton):
-            if widget.text().endswith('m'):
-                widget.setEnabled(is_scheduled)
+        # # 启用/禁用相关控件
+        # self.schedule_time.setEnabled(is_scheduled)
+        # self.repeat_interval.setEnabled(is_scheduled)
+        # self.repeat_count.setEnabled(is_scheduled)
+        #
+        # # 启用/禁用快捷按钮
+        # for widget in self.findChildren(QPushButton):
+        #     if widget.text().endswith('m'):
+        #         widget.setEnabled(is_scheduled)
 
         # 更新提示
         if is_scheduled:
@@ -2228,75 +2246,117 @@ class AutomationUI(QMainWindow):
                 }
             """)
 
-    def add_minutes_to_time(self, minutes):
-        """在当前时间基础上添加分钟数"""
-        if minutes == 0:
-            # 设置为当前时间
-            current_time = QTime.currentTime()
-            self.schedule_time.setTime(current_time)
+
+    # 在类中添加处理编辑的函数
+    def on_repeat_count_edited(self, text):
+        """处理重复次数编辑事件"""
+        # 如果用户输入了"无限"，则设置为"无限"
+        if text == "无限":
+            return
+
+        # 如果输入的是数字，验证范围
+        if text.isdigit():
+            value = int(text)
+            if value < 1:
+                # 如果小于1，设置为1
+                self.repeat_count.setCurrentText("1")
+            elif value > 999999:
+                # 如果大于999999，设置为999999
+                self.repeat_count.setCurrentText("999999")
+        elif text != "":
+            # 如果输入的不是数字也不是"无限"，清除输入
+            cursor_pos = self.repeat_count.lineEdit().cursorPosition()
+            self.repeat_count.setCurrentText("".join(filter(str.isdigit, text)))
+            self.repeat_count.lineEdit().setCursorPosition(min(cursor_pos, len(self.repeat_count.currentText())))
+
+    # 修改获取重复次数值的方法
+    def get_repeat_count_value(self):
+        """获取重复次数的实际值"""
+        text = self.repeat_count.currentText()
+        if text == "无限":
+            return "无限"
+        elif text.isdigit():
+            return text
         else:
-            current_time = self.schedule_time.time()
-            new_time = current_time.addSecs(minutes * 60)
-            self.schedule_time.setTime(new_time)
+            return "1"  # 默认值
 
     def update_next_run_time(self):
         """更新下一次执行时间显示"""
-        if self.schedule_enable.currentText() != "定时执行":
-            self.next_run_label.setText("立即执行模式")
-            self.next_run_label.setStyleSheet("""
-                QLabel {
-                    color: #666; 
-                    font-size: 11px; 
-                    padding: 8px;
-                    background-color: #f8f8f8;
-                    border-radius: 5px;
-                    border: 1px solid #e0e0e0;
-                    margin: 2px;
-                }
-            """)
-            return
+        schedule_type = self.schedule_enable.currentText()
 
-        schedule_time = self.schedule_time.time()
+        # 获取当前设置的值
         interval = self.repeat_interval.value()
         repeat_type = self.repeat_count.currentText()
 
-        now = QTime.currentTime()
-        current_date = QDate.currentDate()
-        next_run = QTime(schedule_time.hour(), schedule_time.minute(), schedule_time.second())
+        # 如果是定时执行模式
+        if schedule_type == "定时执行":
+            schedule_time = self.schedule_time.time()
+            now = QTime.currentTime()
+            current_date = QDate.currentDate()
+            next_run = QTime(schedule_time.hour(), schedule_time.minute(), schedule_time.second())
 
-        # 计算下一次执行日期时间
-        if next_run < now:
-            # 如果今天的时间已过，则明天执行
-            next_date = current_date.addDays(1)
-        else:
-            next_date = current_date
-
-        next_run_datetime = QDateTime(next_date, next_run)
-        next_run_str = next_run_datetime.toString("yyyy-MM-dd HH:mm:ss")
-
-        if interval > 0:
-            if repeat_type == "无限":
-                message = f"下次执行: {next_run_str}\n每 {interval} 分钟重复，无限次"
-                color = "#2c5aa0"
+            # 计算下一次执行日期时间
+            if next_run < now:
+                # 如果今天的时间已过，则明天执行
+                next_date = current_date.addDays(1)
             else:
-                message = f"下次执行: {next_run_str}\n每 {interval} 分钟重复，共 {repeat_type} 次"
-                color = "#2c5aa0"
-        else:
-            message = f"下次执行: {next_run_str}\n单次执行"
-            color = "#666666"
+                next_date = current_date
 
-        self.next_run_label.setText(message)
-        self.next_run_label.setStyleSheet(f"""
-            QLabel {{
-                color: {color}; 
-                font-size: 11px; 
-                padding: 8px;
-                background-color: #f0f8ff;
-                border-radius: 5px;
-                border: 1px solid #d0e0f0;
-                margin: 2px;
-            }}
-        """)
+            next_run_datetime = QDateTime(next_date, next_run)
+            next_run_str = next_run_datetime.toString("yyyy-MM-dd HH:mm:ss")
+
+            if interval > 0:
+                if repeat_type == "无限":
+                    message = f"下次执行: {next_run_str}\n每 {interval} 分钟重复，无限次"
+                    color = "#2c5aa0"
+                else:
+                    message = f"下次执行: {next_run_str}\n每 {interval} 分钟重复，共 {repeat_type} 次"
+                    color = "#2c5aa0"
+            else:
+                message = f"下次执行: {next_run_str}\n无间隔时间 共 {repeat_type} 次"
+                color = "#2c5aa0"
+
+            self.next_run_label.setText(message)
+            self.next_run_label.setStyleSheet(f"""
+                QLabel {{
+                    color: {color}; 
+                    font-size: 11px; 
+                    padding: 8px;
+                    background-color: #f0f8ff;
+                    border-radius: 5px;
+                    border: 1px solid #d0e0f0;
+                    margin: 2px;
+                }}
+            """)
+        else:
+            # 立即执行模式
+            now = QDateTime.currentDateTime()
+            next_run_datetime = now.addSecs(1)  # 立即执行，下一次执行时间就是现在
+            next_run_datetime_str = next_run_datetime.toString("HH:mm:ss")
+
+            if interval > 0:
+                if repeat_type == "无限":
+                    message = f"立即执行\n每 {interval} 分钟重复，无限次"
+                    color = "#2c5aa0"
+                else:
+                    message = f"立即执行\n每 {interval} 分钟重复，共 {repeat_type} 次"
+                    color = "#2c5aa0"
+            else:
+                message = f"立即执行，无间隔，共 {repeat_type} 次"
+                color = "#2c5aa0"
+
+            self.next_run_label.setText(message)
+            self.next_run_label.setStyleSheet(f"""
+                QLabel {{
+                    color: {color}; 
+                    font-size: 11px; 
+                    padding: 8px;
+                    background-color: #f0f8ff;
+                    border-radius: 5px;
+                    border: 1px solid #d0e0f0;
+                    margin: 2px;
+                }}
+            """)
 
     def validate_schedule_settings(self):
         """验证定时设置是否有效"""
@@ -2333,7 +2393,7 @@ class AutomationUI(QMainWindow):
         if not os.path.isdir(config_dir):
             os.makedirs(config_dir, exist_ok=True)
             return
-
+        first_task_loaded = False  # 标记是否已加载第一个任务
         for fname in os.listdir(config_dir):
             if not fname.endswith(".json"):
                 continue
@@ -2349,18 +2409,55 @@ class AutomationUI(QMainWindow):
                         self.tasks[task_name] = task_config
 
                         # 选中新导入的任务
-                        for i in range(self.task_list.count()):
-                            item = self.task_list.item(i)
-                            widget = self.task_list.itemWidget(item)
-                            if widget and widget.task_name == task_name:
-                                self.task_list.setCurrentItem(item)
-                                break
-                        # QMessageBox.information(self, "导入成功", "任务配置已导入")
+                        # 如果是第一个加载的任务，则选中并显示其配置
+                        if not first_task_loaded:
+                            for i in range(self.task_list.count()):
+                                item = self.task_list.item(i)
+                                widget = self.task_list.itemWidget(item)
+
+                                if widget and widget.task_name == task_name:
+                                    self.task_list.setCurrentItem(item)
+                                    self.display_task_config(task_name)
+                                    first_task_loaded = True
+                                    break
                     except Exception as e:
                         QMessageBox.critical(self, "导入失败", f"导入配置时出错: {str(e)}")
-
             except Exception as e:
                 print(f"加载配置 {path} 失败：{e}")
+
+    def display_task_config(self, task_name):
+        """
+        显示指定任务的配置数据到定时设置和操作步骤配置区域
+        """
+        print(task_name)
+        if task_name not in self.tasks:
+            return
+
+        task_config = self.tasks[task_name]
+
+        # 显示任务名称
+        self.task_name.setText(task_name)
+
+        # 显示定时设置
+        schedule = task_config.get("schedule", {})
+        self.schedule_enable.setCurrentText(schedule.get("enable", "立即执行"))
+        time_str = schedule.get("time", QTime.currentTime().toString("HH:mm:ss"))
+
+        # 解析时间字符串
+        time_parts = time_str.split(":")
+        if len(time_parts) == 3:
+            hour, minute, second = map(int, time_parts)
+            self.schedule_time.setTime(QTime(hour, minute, second))
+
+        self.repeat_interval.setValue(int(schedule.get("interval", 0)))
+        self.repeat_count.setCurrentText(str(schedule.get("repeat", "1")))
+
+        # 显示步骤配置
+        steps = task_config.get("steps", [])
+        self.steps_table.setRowCount(0)  # 清空现有步骤
+
+        for step in steps:
+            self.add_step_to_table(step)
     def create_system_tray(self):
         """创建系统托盘图标"""
         self.tray_icon = QSystemTrayIcon(self)
@@ -3811,8 +3908,6 @@ class AutomationUI(QMainWindow):
             self.steps_table.setItem(selected_row, 2, QTableWidgetItem(params_text))
             self.steps_table.setItem(selected_row, 3, QTableWidgetItem(str(new_step_data.get("delay", 0))))
 
-            # 更新任务配置
-            self.tasks[self.current_task]["steps"][selected_row] = new_step_data
 
     def remove_step(self):
         selected_row = self.steps_table.currentRow()
@@ -3885,7 +3980,12 @@ class AutomationUI(QMainWindow):
                     self.current_task = new_name
                     break
 
-        # 更新定时设置
+        self.export_config()
+        # QMessageBox.information(self, "保存成功", "任务配置已保存")
+
+    def export_config(self):
+        if not self.current_task:
+            return
         if self.current_task in self.tasks:
             self.tasks[self.current_task]["schedule"] = {
                 "enable": self.schedule_enable.currentText(),
@@ -3893,13 +3993,6 @@ class AutomationUI(QMainWindow):
                 "interval": self.repeat_interval.value(),
                 "repeat": self.repeat_count.currentText()
             }
-        self.export_config()
-        # QMessageBox.information(self, "保存成功", "任务配置已保存")
-
-    def export_config(self):
-        if not self.current_task:
-            return
-
         file_path, _ = QFileDialog.getSaveFileName(
             self, "导出配置", "", "JSON文件 (*.json)"
         )
