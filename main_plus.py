@@ -2972,7 +2972,7 @@ class AutomationUI(QMainWindow):
 
             # 如果当前时间已超过设定时间，则明天执行
             if first_run < now:
-                first_run = first_run.addSecs(24 * 3600).addSecs(-10)  # 加一天 -10秒
+                first_run = first_run.addSecs(24 * 3600)  # 加一天
 
             # 计算延迟时间（毫秒）
             delay_ms = now.msecsTo(first_run)
