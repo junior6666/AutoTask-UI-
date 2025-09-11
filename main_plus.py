@@ -1709,7 +1709,7 @@ class StepConfigDialog(QDialog):
                 "delay_ms": self.hotkey_delay_spin.value()
             }
         params["step_time"] = datetime.now().strftime("%H:%M:%S")
-        print(f"步骤数据: {params}")
+        # print(f"步骤数据: {params}")
         return {
             "type": step_type,
             "params": params,
@@ -2465,6 +2465,14 @@ class AutomationUI(QMainWindow):
         self.move_duration_spinbox.setFixedWidth(80)
         self.move_duration_spinbox.setEnabled(False)  # 默认禁用，由 checkbox 控制
 
+        # 3. 窗口最小化设置（新增）
+        minimize_layout = QHBoxLayout()
+        self.minimize_during_execution_checkbox = QCheckBox("执行任务时最小化窗口")
+        self.minimize_during_execution_checkbox.setChecked(True)  # 默认勾选
+
+        minimize_layout.addWidget(self.minimize_during_execution_checkbox)
+        minimize_layout.addStretch()
+
         # 连接 checkbox 控制 spinbox 启用状态
         def on_instant_click_toggled(checked):
             self.move_duration_spinbox.setEnabled(not checked)
@@ -2479,6 +2487,7 @@ class AutomationUI(QMainWindow):
         settings_layout.addWidget(self.auto_skip_checkbox)
         settings_layout.addLayout(timeout_layout)
         settings_layout.addLayout(mouse_layout)
+        settings_layout.addLayout(minimize_layout)  # 添加新行
 
         # 包装为菜单项
         action = QWidgetAction(settings_menu)
@@ -2959,16 +2968,16 @@ class AutomationUI(QMainWindow):
 
             # 计算第一次执行的时间
             now = QTime.currentTime()
-            first_run = QTime(schedule_time.hour(), schedule_time.minute(), schedule_time.second())
+            first_run = QTime(schedule_time.hour(), schedule_time.minute(), schedule_time.second()).addSecs(-10)
 
             # 如果当前时间已超过设定时间，则明天执行
             if first_run < now:
-                first_run = first_run.addSecs(24 * 3600)  # 加一天
+                first_run = first_run.addSecs(24 * 3600).addSecs(-10)  # 加一天
 
             # 计算延迟时间（毫秒）
             delay_ms = now.msecsTo(first_run)
 
-            # 更新UI状态为等待定时
+            # 更新UI状态
             self.start_current_btn.setEnabled(False)
             self.stop_current_btn.setEnabled(True)
             self.task_status.setText("定时执行中")
@@ -3035,7 +3044,7 @@ class AutomationUI(QMainWindow):
             self.scheduled_timers[task_name] = initial_timer
 
             # 显示提示信息
-            first_run_str = first_run.toString('HH:mm:ss')
+            first_run_str = first_run.addSecs(10).toString('HH:mm:ss')
             self.log_text.appendPlainText(
                 f"[{time.strftime('%H:%M:%S')}] 已设置定时任务: {task_name} 将在 {first_run_str} 执行")
 
@@ -3152,9 +3161,10 @@ class AutomationUI(QMainWindow):
                 widget.start_btn.setEnabled(False)
                 widget.stop_btn.setEnabled(True)
                 break
-
+        if hasattr(self, 'minimize_during_execution_checkbox') and \
+                self.minimize_during_execution_checkbox.isChecked():
         # 新增：任务开始后最小化窗口
-        self.showMinimized()
+            self.showMinimized()
 
     def stop_current_task(self):
         # 停止当前运行的任务
