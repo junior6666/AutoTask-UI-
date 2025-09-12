@@ -2429,7 +2429,6 @@ class AutomationUI(QMainWindow):
         """
         显示指定任务的配置数据到定时设置和操作步骤配置区域
         """
-        print(task_name)
         if task_name not in self.tasks:
             return
 
@@ -3155,13 +3154,84 @@ class AutomationUI(QMainWindow):
             return  # 如果是定时执行，直接返回，不立即执行任务
 
         # 立即执行任务的逻辑
-        self.execute_task_immediately()
 
-    def run_task_with_countdown(self, task_name):
+        elif schedule_type == "立即执行":
+            def do_it_right_now_ui_update():
+                # 更新UI状态
+                self.start_current_btn.setEnabled(False)
+                self.stop_current_btn.setEnabled(True)
+                self.task_status.setText("立即执行中")
+
+                # 更新任务列表中的状态
+                for i in range(self.task_list.count()):
+                    item = self.task_list.item(i)
+                    widget = self.task_list.itemWidget(item)
+                    if widget and widget.task_name == self.current_task:
+                        widget.status_label.setText("立即执行中")
+                        widget.start_btn.setEnabled(False)
+                        widget.stop_btn.setEnabled(True)
+                        break
+            do_it_right_now_ui_update()
+            self.execute_task_immediately()
+            # 处理立即执行逻辑（包含重复执行）
+            task_name = self.current_task
+            interval_minutes = self.repeat_interval.value()
+            repeat_count = self.repeat_count.currentText()
+            if interval_minutes != 0  and repeat_count != "1":
+                # 如果任务已有定时器，先停止
+                if task_name in self.scheduled_timers:
+                    self.scheduled_timers[task_name].stop()
+                    del self.scheduled_timers[task_name]
+                if repeat_count == "无限":
+                    try:
+                        total_count = 999999
+                        current_count = [1]  # 使用列表以便在闭包中修改
+                        if current_count[0] < total_count:
+                            repeat_timer = QTimer(self)
+                            def run_repeat_with_countdown():
+                                do_it_right_now_ui_update()
+                                self.execute_task_immediately()
+                                current_count[0] += 1
+                                if current_count[0] >= total_count:
+                                    repeat_timer.stop()
+                                    if task_name in self.scheduled_timers:
+                                        del self.scheduled_timers[task_name]
+                            repeat_timer.timeout.connect(run_repeat_with_countdown)
+                            repeat_timer.setInterval(interval_minutes * 60 * 1000)
+                            repeat_timer.start()
+                            # 保存重复定时器引用
+                            self.scheduled_timers[task_name] = repeat_timer
+                    except ValueError as e:
+                        QMessageBox.warning(self, "错误", str(e))
+                    # 保存重复定时器引用
+                elif repeat_count != "无限":
+                    try:
+                        total_count = int(repeat_count)
+                        current_count = [1]  # 使用列表以便在闭包中修改
+                        if current_count[0] < total_count:
+                            repeat_timer = QTimer(self)
+                            def run_repeat_with_countdown():
+                                do_it_right_now_ui_update()
+                                self.execute_task_immediately()
+                                current_count[0] += 1
+                                if current_count[0] >= total_count:
+                                    repeat_timer.stop()
+                                    if task_name in self.scheduled_timers:
+                                        del self.scheduled_timers[task_name]
+                            repeat_timer.timeout.connect(run_repeat_with_countdown)
+                            repeat_timer.setInterval(interval_minutes * 60 * 1000)
+                            repeat_timer.start()
+                            # 保存重复定时器引用
+                            self.scheduled_timers[task_name] = repeat_timer
+                    except ValueError as e:
+                        QMessageBox.warning(self, "错误", str(e))
+
+
+    def run_task_with_countdown(self, task_name,countdown_seconds = 10):
         """执行带倒计时的任务"""
         # 创建倒计时定时器
         countdown_timer = QTimer(self)
-        countdown_seconds = 10
+
         countdown_timer.setInterval(1000)  # 每秒触发一次
 
         def update_countdown():
@@ -3225,15 +3295,15 @@ class AutomationUI(QMainWindow):
 
         # 设置重复次数
         repeat_text = self.repeat_count.currentText()
-        if repeat_text == "无限":
-            self.task_runner.set_repeat_count(9999)  # 设置一个很大的数表示无限
+
+        if self.repeat_interval.value() == 0:
+            if repeat_text == "无限":
+                self.task_runner.set_repeat_count(99999)  # 设置一个很大的数表示无限
+            else:
+                count = int(repeat_text)
+                self.task_runner.set_repeat_count(count)
         else:
-            try:
-                if self.repeat_interval.value() == 0:
-                    count = int(repeat_text)
-                    self.task_runner.set_repeat_count(count)
-            except:
-                self.task_runner.set_repeat_count(1)
+            self.task_runner.set_repeat_count(1)
 
         # 连接信号
         self.task_runner.task_completed.connect(self.on_task_completed)
@@ -3263,6 +3333,8 @@ class AutomationUI(QMainWindow):
                 self.minimize_during_execution_checkbox.isChecked():
         # 新增：任务开始后最小化窗口
             self.showMinimized()
+        self.statusBar().showMessage("任务执行完成")
+
 
     def stop_current_task(self):
         # 停止当前运行的任务
@@ -4017,9 +4089,6 @@ class AutomationUI(QMainWindow):
                 task_name = task_config.get("name", "导入的任务")
                 self.add_task(task_name)
                 self.tasks[task_name] = task_config
-                self.steps_table.setRowCount(0)
-                for step in task_config["steps"]:
-                    self.add_step_to_table(step)
 
                 # 选中新导入的任务
                 for i in range(self.task_list.count()):
@@ -4028,6 +4097,7 @@ class AutomationUI(QMainWindow):
                     if widget and widget.task_name == task_name:
                         self.task_list.setCurrentItem(item)
                         break
+                self.load_task_config(task_name)
 
                 QMessageBox.information(self, "导入成功", "任务配置已导入")
             except Exception as e:
