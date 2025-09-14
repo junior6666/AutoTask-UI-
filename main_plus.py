@@ -272,8 +272,8 @@ font-weight:bold;""")
         font.setPointSize(8)
         time_label.setFont(font)
         time_label.setStyleSheet("""color:#ffffff;
-background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #0078d4,stop:1 #00bcf2);
-border-radius:6px;
+background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #d5d5d5,stop:0.5 #adadad,stop:1 #9f9f9f);
+border-radius:10px;
 padding:2px 6px;
 font-weight:bold;""")
 
@@ -283,9 +283,13 @@ font-weight:bold;""")
             if os.path.isfile(img_path):
                 pm = QPixmap(img_path).scaledToHeight(StepTableHelper.IMG_HEIGHT, Qt.SmoothTransformation)
                 content_label.setPixmap(pm)
+                content_label.setStyleSheet("""
+                border-radius:6px;
+                padding:2px 6px;
+                font-weight:bold;""")
             else:
                 content_label.setText(os.path.basename(img_path))
-            icon_label.setText("👆")
+            icon_label.setText("🖱️")
 
         elif t == "文本输入":
             txt = p.get("text", "")
@@ -450,7 +454,7 @@ class AboutDialog(QDialog):
         form = QFormLayout()
         form.setLabelAlignment(Qt.AlignRight)
         form.addRow("版　本：", QLabel("1.0.0"))
-        form.addRow("作　者：", QLabel("B_arbarian from UESTEC"))
+        form.addRow("作　者：", QLabel("B_arbarian from UESTC"))
         author_layout.addWidget(self.avatar)
         author_layout.addLayout(form)
         author_layout.addStretch()
@@ -553,7 +557,7 @@ class TaskRunner(QObject):
     task_stopped = Signal(str)
     log_message = Signal(str, str)  # 新增日志信号
 
-    def __init__(self, task_name, steps,auto_skip_image_timeout=False,timeout=10,instant_click=False,move_duration=0.1):
+    def __init__(self, task_name, steps,auto_skip_image_timeout=False,timeout=10,instant_click=False,move_duration=0.1,parent=None):
         super().__init__()
         self.task_name = task_name
         self.steps = steps
@@ -561,6 +565,7 @@ class TaskRunner(QObject):
         self.current_step = 0
         self.repeat_count = 0
         self.max_repeat = 1  # 默认执行1次
+        self.repeat_interval = 0
 
         self.auto_skip_image_timeout = auto_skip_image_timeout
         self.timeout = timeout  # 用户设置的超时时间
@@ -571,6 +576,16 @@ class TaskRunner(QObject):
         self._excel_cycle = None
         self._excel_cache = {}   # 路径->(wb, ws, rows)
 
+        self.parent =  parent
+
+    def set_repeat_interval(self, interval_minutes):
+        """
+        设置重复间隔时间
+
+        Args:
+            interval_minutes (int): 间隔时间（分钟）
+        """
+        self.repeat_interval = interval_minutes
     def set_repeat_count(self, count):
         self.max_repeat = count
 
@@ -652,7 +667,7 @@ class TaskRunner(QObject):
                 self.repeat_count += 1
                 if self.max_repeat > 1:
                     self.log_message.emit(self.task_name, f"🔄 第 {self.repeat_count}/{self.max_repeat} 次执行")
-
+                    self.parent.statusBar().showMessage(f"【{self.task_name}】第 {self.repeat_count}/{self.max_repeat} 次执行")
                 for i, step in enumerate(self.steps):
                     if not self.is_running:
                         self.log_message.emit(self.task_name, "⏹️ 任务被中断")
@@ -698,12 +713,33 @@ class TaskRunner(QObject):
                         self.log_message.emit(self.task_name, f"⏱️ 步骤延时: {delay}秒")
                         time.sleep(delay)
 
+                # 检查是否需要等待下次重复执行
+                if self.repeat_count < self.max_repeat and self.is_running and self.repeat_interval > 0:
+                    wait_seconds = self.repeat_interval * 60  # 转换为秒
+                    countdown_start = wait_seconds - 10  # 提前10秒开始倒计时
+                    self.log_message.emit(self.task_name, f"⏳ 间隔等待: {self.repeat_interval}分钟")
+                    self.parent.statusBar().showMessage(
+                        f"【{self.task_name}】⏳ 间隔等待: {self.repeat_interval}分钟")
+                    # 分段等待，每秒检查一次是否停止
+                    for _ in range(int(countdown_start)):
+                        if not self.is_running:
+                            self.log_message.emit(self.task_name, "⏹️ 任务被中断")
+                            break
+                        time.sleep(1)
+                    # 开始10秒倒计时
+                    countdown_seconds = 10
+                    while countdown_seconds > 0 and self.is_running:
+                        current_time = time.strftime('%H:%M:%S')  # 获取当前时间
+                        self.parent.statusBar().showMessage(
+                            f"[{current_time}]【{self.task_name}】⏳ 倒计时: {countdown_seconds} 秒")
+                        time.sleep(1)
+                        countdown_seconds -= 1
                 if not self.is_running:
                     break
-
             success = self.is_running
             message = "✅ 任务完成" if success else "⏹️ 任务被中断"
             self.log_message.emit(self.task_name, message)
+            self.parent.statusBar().showMessage(message)
             self.task_completed.emit(self.task_name, success, message)
         except Exception as e:
             error_msg = f"❌ 任务执行出错: {str(e)}"
@@ -2085,6 +2121,7 @@ class AutomationUI(QMainWindow):
                 margin: 2px;
             }
         """)
+        self.next_run_label.setMinimumWidth(200)
         self.next_run_label.setAlignment(Qt.AlignCenter)
         self.next_run_label.setWordWrap(True)
         schedule_layout.addWidget(self.next_run_label, 0, 5, 2, 5)
@@ -2802,12 +2839,13 @@ class AutomationUI(QMainWindow):
         text.setHtml("""
             <h2>自动化任务管理器使用文档</h2>
             <p>欢迎使用自动化任务管理器！本工具可以帮助您自动化执行重复的计算机操作。</p>
+            <p>github开源链接：https://github.com/junior6666/AutoTask-UI-</p
 
             <h3>基本功能</h3>
             <ul>
                 <li><b>创建任务</b>：点击"新建任务"按钮创建新任务</li>
                 <li><b>添加步骤</b>：在任务中添加鼠标点击、文本输入、等待等操作步骤</li>
-                <li><b>定时执行</b>：设置任务在特定时间自动执行，将执行方式改为定时执行，并点击应用定时设置</li>
+                <li><b>定时执行</b>：根据任务需求设置任务的执行时间，点击开始当前任务按钮即可</li>
                 <li><b>执行日志</b>：查看任务执行过程中的详细日志</li>
             </ul>
 
@@ -2830,6 +2868,11 @@ class AutomationUI(QMainWindow):
             A: 查看执行日志中的错误信息，调整步骤参数后重试</p>
             <p><b>Q: 13:14如何计算的？</b><br>
             A: 无论用户什么时候点击按钮，文案中的“相恋时间”都以 今天 13:14 为截止点计算。以确保定时在13：14发送的逻辑</p>
+            <p><b>Q: 开发框架？</b><br>
+            A: GUI：🐍 PySide6
+            自动化：🤖 PyAutoGUI + 🔍 OpenCV</p>
+            <p><b>Q: 开发时长？</b><br>
+            A: 核心功能实现 2 days 不过一直在断断续续完善UI和修复各种bug 也欢迎大家参与到源码的开发</p>
         """)
 
         layout.addWidget(text)
@@ -3059,8 +3102,6 @@ class AutomationUI(QMainWindow):
 
             # 获取定时设置
             schedule_time = self.schedule_time.time()
-            interval_minutes = self.repeat_interval.value()
-            repeat_count = self.repeat_count.currentText()
 
             # 计算第一次执行的时间
             now = QTime.currentTime()
@@ -3094,44 +3135,8 @@ class AutomationUI(QMainWindow):
 
             def run_initial_task():
                 # 执行倒计时并运行任务
+                # 将重复间隔和重复次数传递给任务执行函数
                 self.run_task_with_countdown(task_name)
-
-                # 如果需要重复执行，设置重复定时器
-                if repeat_count == "无限":
-                    repeat_timer = QTimer(self)
-
-                    def run_repeat_with_countdown():
-                        self.run_task_with_countdown(task_name)
-
-                    repeat_timer.timeout.connect(run_repeat_with_countdown)
-                    repeat_timer.setInterval(interval_minutes * 60 * 1000)  # 转换为毫秒
-                    repeat_timer.start()
-                    # 保存重复定时器引用
-                    self.scheduled_timers[task_name] = repeat_timer
-
-                elif repeat_count != "1":
-                    try:
-                        total_count = int(repeat_count)
-                        current_count = [1]  # 使用列表以便在闭包中修改
-
-                        if current_count[0] < total_count:
-                            repeat_timer = QTimer(self)
-
-                            def run_repeat_with_countdown():
-                                self.run_task_with_countdown(task_name)
-                                current_count[0] += 1
-                                if current_count[0] >= total_count:
-                                    repeat_timer.stop()
-                                    if task_name in self.scheduled_timers:
-                                        del self.scheduled_timers[task_name]
-
-                            repeat_timer.timeout.connect(run_repeat_with_countdown)
-                            repeat_timer.setInterval(interval_minutes * 60 * 1000)
-                            repeat_timer.start()
-                            # 保存重复定时器引用
-                            self.scheduled_timers[task_name] = repeat_timer
-                    except ValueError:
-                        pass  # 无效的重复次数
 
             initial_timer.timeout.connect(run_initial_task)
             initial_timer.start(delay_ms)
@@ -3152,88 +3157,15 @@ class AutomationUI(QMainWindow):
                                     f"[{time.strftime('%H:%M:%S')}] 已设置定时任务: {task_name} 将在 {first_run_str} 执行\n请保持桌面处于从不熄屏状态")
 
             return  # 如果是定时执行，直接返回，不立即执行任务
-
         # 立即执行任务的逻辑
-
         elif schedule_type == "立即执行":
-            def do_it_right_now_ui_update():
-                # 更新UI状态
-                self.start_current_btn.setEnabled(False)
-                self.stop_current_btn.setEnabled(True)
-                self.task_status.setText("立即执行中")
-
-                # 更新任务列表中的状态
-                for i in range(self.task_list.count()):
-                    item = self.task_list.item(i)
-                    widget = self.task_list.itemWidget(item)
-                    if widget and widget.task_name == self.current_task:
-                        widget.status_label.setText("立即执行中")
-                        widget.start_btn.setEnabled(False)
-                        widget.stop_btn.setEnabled(True)
-                        break
-            do_it_right_now_ui_update()
             self.execute_task_immediately()
-            # 处理立即执行逻辑（包含重复执行）
-            task_name = self.current_task
-            interval_minutes = self.repeat_interval.value()
-            repeat_count = self.repeat_count.currentText()
-            if interval_minutes != 0  and repeat_count != "1":
-                # 如果任务已有定时器，先停止
-                if task_name in self.scheduled_timers:
-                    self.scheduled_timers[task_name].stop()
-                    del self.scheduled_timers[task_name]
-                if repeat_count == "无限":
-                    try:
-                        total_count = 999999
-                        current_count = [1]  # 使用列表以便在闭包中修改
-                        if current_count[0] < total_count:
-                            repeat_timer = QTimer(self)
-                            def run_repeat_with_countdown():
-                                do_it_right_now_ui_update()
-                                self.execute_task_immediately()
-                                current_count[0] += 1
-                                if current_count[0] >= total_count:
-                                    repeat_timer.stop()
-                                    if task_name in self.scheduled_timers:
-                                        del self.scheduled_timers[task_name]
-                            repeat_timer.timeout.connect(run_repeat_with_countdown)
-                            repeat_timer.setInterval(interval_minutes * 60 * 1000)
-                            repeat_timer.start()
-                            # 保存重复定时器引用
-                            self.scheduled_timers[task_name] = repeat_timer
-                    except ValueError as e:
-                        QMessageBox.warning(self, "错误", str(e))
-                    # 保存重复定时器引用
-                elif repeat_count != "无限":
-                    try:
-                        total_count = int(repeat_count)
-                        current_count = [1]  # 使用列表以便在闭包中修改
-                        if current_count[0] < total_count:
-                            repeat_timer = QTimer(self)
-                            def run_repeat_with_countdown():
-                                do_it_right_now_ui_update()
-                                self.execute_task_immediately()
-                                current_count[0] += 1
-                                if current_count[0] >= total_count:
-                                    repeat_timer.stop()
-                                    if task_name in self.scheduled_timers:
-                                        del self.scheduled_timers[task_name]
-                            repeat_timer.timeout.connect(run_repeat_with_countdown)
-                            repeat_timer.setInterval(interval_minutes * 60 * 1000)
-                            repeat_timer.start()
-                            # 保存重复定时器引用
-                            self.scheduled_timers[task_name] = repeat_timer
-                    except ValueError as e:
-                        QMessageBox.warning(self, "错误", str(e))
-
 
     def run_task_with_countdown(self, task_name,countdown_seconds = 10):
         """执行带倒计时的任务"""
         # 创建倒计时定时器
         countdown_timer = QTimer(self)
-
         countdown_timer.setInterval(1000)  # 每秒触发一次
-
         def update_countdown():
             nonlocal countdown_seconds
             current_time = time.strftime('%H:%M:%S')  # 获取当前时间
@@ -3250,17 +3182,14 @@ class AutomationUI(QMainWindow):
                 )
                 # 实际执行任务
                 self.execute_task_immediately()
-
         # 启动倒计时
         countdown_timer.timeout.connect(update_countdown)
         countdown_timer.start()
-
         # 立即更新一次倒计时显示
         current_time = time.strftime('%H:%M:%S')
         self.statusBar().showMessage(
             f"[{current_time}] 任务 '{task_name}' 即将执行: {countdown_seconds}秒"
         )
-
         # 保存倒计时定时器引用以便可以停止
         if not hasattr(self, 'countdown_timers'):
             self.countdown_timers = {}
@@ -3271,7 +3200,7 @@ class AutomationUI(QMainWindow):
             return
 
         # 清除状态栏的倒计时信息
-        self.statusBar().showMessage("任务开始执行")
+        self.statusBar().showMessage("")
 
         # 获取任务配置
         task_config = self.tasks.get(self.current_task, {})
@@ -3291,7 +3220,8 @@ class AutomationUI(QMainWindow):
                                       auto_skip_image_timeout=auto_skip,
                                       timeout=timeout,
                                       instant_click=instant_click,
-                                      move_duration=move_duration)
+                                      move_duration=move_duration,
+                                      parent=self)
 
         # 设置重复次数
         repeat_text = self.repeat_count.currentText()
@@ -3302,11 +3232,15 @@ class AutomationUI(QMainWindow):
             else:
                 count = int(repeat_text)
                 self.task_runner.set_repeat_count(count)
-        else:
-            self.task_runner.set_repeat_count(1)
-
+        elif self.repeat_interval.value() > 0:
+            self.task_runner.set_repeat_interval(self.repeat_interval.value())
+            if repeat_text == "无限":
+                self.task_runner.set_repeat_count(99999)  # 设置一个很大的数表示无限
+            else:
+                count = int(repeat_text)
+                self.task_runner.set_repeat_count(count)
         # 连接信号
-        self.task_runner.task_completed.connect(self.on_task_completed)
+        # self.task_runner.task_completed.connect(self.on_task_completed)
         self.task_runner.task_progress.connect(self.on_task_progress)
         self.task_runner.log_message.connect(self.on_log_message)  # 连接日志信号
 
@@ -3333,7 +3267,7 @@ class AutomationUI(QMainWindow):
                 self.minimize_during_execution_checkbox.isChecked():
         # 新增：任务开始后最小化窗口
             self.showMinimized()
-        self.statusBar().showMessage("任务执行完成")
+        # self.statusBar().showMessage("任务执行完成")
 
 
     def stop_current_task(self):
@@ -3465,10 +3399,10 @@ class AutomationUI(QMainWindow):
         task_name = widget.task_name if widget else ""
 
         # 添加菜单项
-        rename_action = menu.addAction(QIcon.fromTheme("edit-rename"), "✏️ 重命名")
-        duplicate_action = menu.addAction(QIcon.fromTheme("edit-copy"), "📋 创建副本")
+        rename_action = menu.addAction("✏️ 重命名")
+        duplicate_action = menu.addAction("📋 创建副本")
         menu.addSeparator()
-        delete_action = menu.addAction(QIcon.fromTheme("edit-delete"), "🗑️ 删除任务")
+        delete_action = menu.addAction("🗑️ 删除任务")
         menu.setStyleSheet("""
               QMenu {
                   /* 可选：菜单整体背景 */
@@ -3979,6 +3913,9 @@ class AutomationUI(QMainWindow):
 
             self.steps_table.setItem(selected_row, 2, QTableWidgetItem(params_text))
             self.steps_table.setItem(selected_row, 3, QTableWidgetItem(str(new_step_data.get("delay", 0))))
+
+            self.tasks[self.current_task]["steps"][selected_row] = new_step_data
+
 
 
     def remove_step(self):
