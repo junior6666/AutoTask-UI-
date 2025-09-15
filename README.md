@@ -36,8 +36,8 @@ git clone https://github.com/junior6666/AutoTask-UI-.git
 cd AutoTask-UI
 
 # 2️⃣ 创建虚拟环境（可选）
-conda create -n aututask-ui- python=3.11
-conda activate aututask-ui-
+conda create -n autotask-ui- python=3.9
+conda activate autotask-ui-
 
 # 3️⃣ 安装依赖
 pip install -r requirements.txt
