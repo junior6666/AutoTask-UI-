@@ -1,8 +1,9 @@
 🎉 AutoTask-UI- ✨  
 基于 PySide6 的零代码自动化桌面操作工具原型 🚀  
-把每天都要重复的「固定步骤」抽象成可拖拽的「任务」🧩
-让 PyAutoGUI 在后台帮你精确复现 🎯，还能定时调度 ⏰，一键批量管理 📦！
+把每天都要重复的「固定步骤」抽象成可拖拽的「任务」🧩  
+让 PyAutoGUI 在后台帮你精确复现 🎯，还能定时调度 ⏰，一键批量管理 📦！  
 交流QQ群：1057721699（可直接下载软件包）
+
 ---
 
 📑 目录  
@@ -13,6 +14,10 @@
 5. 🛠 技术栈  
 6. 🗺 路线图  
 7. 🤝 贡献指南  
+8. 📦 打包与部署  
+9. 🧾 生成 requirements.txt  
+10. ⚖️ 免责声明  
+11. 📜 License  
 
 ---
 
@@ -32,8 +37,8 @@
 
 ```bash
 # 1️⃣ 克隆仓库
-git clone https://github.com/junior6666/AutoTask-UI-.git
-cd AutoTask-UI
+git clone https://github.com/junior6666/AutoTask-UI-.git 
+cd AutoTask-UI-
 
 # 2️⃣ 创建虚拟环境（可选）
 conda create -n autotask-ui- python=3.9
@@ -94,34 +99,55 @@ pip install -r requirements.txt
 
 ---
 
-## 📜 License  
+## 8. 📦 打包与部署
+
+```bash
+# 单文件 exe（无控制台）
+pyinstaller -F -w -i icon.ico --add-data "img;img;" --name AutoTask main_plus.py
+```
+
+---
+
+## 9. 🧾 生成 requirements.txt
+
+开发完成后，请把**干净**的依赖导出，方便他人一键复现：
+
+```bash
+# 进入虚拟环境
+conda activate autotask-ui-   # 或 venv 的 activate
+
+# ① 快速导出（含所有子依赖）
+pip freeze > requirements.txt
+
+# ② 仅导出项目真实 import 的库（更干净）
+pip install pipreqs
+pipreqs ./ --encoding=utf-8 --force
+```
+
+> 若出现可编辑包（`@ file:///...`），请先 `pip uninstall -e .` 再执行。
+
+---
+
+## 10. ⚖️ 免责声明
+
+1. **自动化风险**：本软件通过模拟鼠标/键盘操作实现自动化，若配置错误可能导致**误点击、数据丢失或系统设置变更**。使用前请在**非生产环境**充分测试。  
+2. **图像识别局限**：模板匹配受分辨率/DPI/主题影响，**同一脚本在不同机器可能失效**，建议统一显示设置并预留容错重试。  
+3. **定时任务**：调度功能依赖系统时钟与 APScheduler，**不保证极端场景下的准时性**，关键业务请配合专业调度平台。  
+4. **合规性**：禁止用于**破坏软件协议、爬虫绕过、刷单、游戏外挂**等任何违法或侵犯第三方权益的场景；违者由使用者自行承担法律责任。  
+5. **数据安全**：配置文件（`.json`/`.yml`）可能包含截图路径、账号等敏感信息，**勿直接上传至公开仓库**，建议加入 `.gitignore`。  
+6. **开源授权**：本项目采用 MIT License，**无任何形式担保**，详见 [LICENSE](./LICENSE) 文件。
+
+---
+
+## 11. 📜 License  
 MIT © 2024 AutoTask-UI Contributors 🧑‍💻👩‍💻
 
 ---
 
-## 📦 项目打包
+## 🐞 已知问题速查
 
-```bash
-pyinstaller -F -w -i icon.ico --add-data "img;img;" main_plus.py
-
-pyinstaller main_plus.spec
-
-pyinstaller -F -w -i icon.ico --add-data "img;img" --name auto_Task2.0.2 main_plus.py
-pyinstaller -F -w -i icon.ico --add-data "img;img" --name auto_Task2.0.3 main_plus.py
-
-```
-
----
-
-## 🐞 Bug 解决
-
-**错误**：`pyautogui.ImageNotFoundException`  
-**原因**：PyAutoGUI ≥ 0.1.30 在找不到图像时会直接抛异常  
-**解决**：降级到 0.1.29
-
-```bash
-pip uninstall pyautogui
-pip install pyautogui==0.1.29
-```
-
-🔗 参考：[CSDN 解决方案](https://blog.csdn.net/m0_53911267/article/details/134731286)
+| 错误 | 原因 | 解决 |
+|---|---|---|
+| `pyautogui.ImageNotFoundException` | PyAutoGUI ≥ 0.1.30 默认抛异常 | `pip install pyautogui==0.1.29` |
+| 打包后图标/图片缺失 | 未正确添加 `--add-data` | 见第 8 节示例 |
+| 索引卡死 | PyCharm 后台 3 processes | `File → Invalidate Caches → Restart` |
