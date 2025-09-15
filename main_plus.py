@@ -237,7 +237,7 @@ class StepTableHelper:
         return t
 
     @staticmethod
-    def widget_of(step: dict) -> QWidget:
+    def widget_of(step: dict, use_color: bool = True) -> QWidget:
         """
         返回一个可直接塞进 QTableWidget 的 QWidget，
         内部 QLabel 负责显示图标/文字/图片 + 时间
@@ -271,25 +271,79 @@ font-weight:bold;""")
         font = QFont()
         font.setPointSize(8)
         time_label.setFont(font)
-        time_label.setStyleSheet("""color:#ffffff;
-background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #d5d5d5,stop:0.5 #adadad,stop:1 #9f9f9f);
-border-radius:10px;
-padding:2px 6px;
-font-weight:bold;""")
+        # 在 time_label 设置样式之前添加以下代码
+        # 将时间字符串转换为颜色值
+        time_obj = datetime.strptime(time_str, "%H:%M:%S")
+        hour = time_obj.hour
+        # minute = time_obj.minute
+        # second = time_obj.second
+        # 根据小时数生成低饱和度渐变色
+        # 早晨(6-12): 蓝绿色调
+        if 6 <= hour < 12:
+            # 从浅蓝到浅绿的渐变（饱和度×1.3）
+            r1, g1, b1 = 152, 196, 211  # 原 173,216,230
+            r2, g2, b2 = 114, 227, 114  # 原 144,238,144
+
+        elif 12 <= hour < 18:
+            # 从浅黄到浅橙的渐变（饱和度×1.3）
+            r1, g1, b1 = 255, 255, 159  # 原 255,255,224
+            r2, g2, b2 = 255, 198, 137  # 原 255,218,185
+
+        elif 18 <= hour < 21:
+            # 从浅粉到浅紫的渐变（饱和度×1.3）
+            r1, g1, b1 = 255, 156, 169  # 原 255,182,193
+            r2, g2, b2 = 214, 214, 238  # 原 230,230,250
+
+        else:  # 21-6 夜晚
+            # 从浅蓝到浅紫的渐变（饱和度×1.3）
+            r1, g1, b1 = 230, 238, 245  # 原 240,248,255
+            r2, g2, b2 = 214, 214, 238  # 原 230,230,250
+        if use_color:
+            time_label.setStyleSheet(f"""color:#ffffff;
+            background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 rgb({r1},{g1},{b1}),stop:1 rgb({r2},{g2},{b2}));
+            border-radius:10px;
+            padding:2px 6px;
+            font-weight:bold;""")
+        else:
+            time_label.setStyleSheet("""color:#ffffff;
+            background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #e5e5e5,stop:0.5 #bdbdbd,stop:1 #9e9e9e);
+            border-radius:6px;
+            padding:2px 6px;
+            font-weight:bold;""")
 
         # 根据类型生成内容
         if t == "鼠标点击":
             img_path = p.get("image_path", "")
+            click_type = p.get("click_type", "")
             if os.path.isfile(img_path):
                 pm = QPixmap(img_path).scaledToHeight(StepTableHelper.IMG_HEIGHT, Qt.SmoothTransformation)
-                content_label.setPixmap(pm)
-                content_label.setStyleSheet("""
-                border-radius:6px;
-                padding:2px 6px;
-                font-weight:bold;""")
+                icon_label.setPixmap(pm)
             else:
-                content_label.setText(os.path.basename(img_path))
-            icon_label.setText("🖱️")
+                icon_label.setText("🖱️")
+            content_label.setText(click_type)
+            # 为不同点击类型设置不同的低饱和度渐变背景
+            if use_color:
+                if click_type == "左键单击":
+                    content_label.setStyleSheet("""color:#ffffff;
+                        background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #a8c0ff,stop:1 #a8c0ff);
+                        border-radius:6px;padding:2px 6px;font-weight:bold;""")
+                elif click_type == "左键双击":
+                    content_label.setStyleSheet("""color:#ffffff;
+                        background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #d4fc79,stop:1 #96e6a1);
+                        border-radius:6px;padding:2px 6px;font-weight:bold;""")
+                elif click_type == "右键单击":
+                    content_label.setStyleSheet("""color:#ffffff;
+                        background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #f6d365,stop:1 #fda085);
+                        border-radius:6px;padding:2px 6px;font-weight:bold;""")
+                elif click_type == "中键单击":
+                    content_label.setStyleSheet("""color:#ffffff;
+                        background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #84fab0,stop:1 #8fd3f4);
+                        border-radius:6px;padding:2px 6px;font-weight:bold;""")
+            else:
+                # 默认样式（如果出现其他点击类型）
+                content_label.setStyleSheet("""color:#ffffff;
+                    background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #e5e5e5,stop:0.5 #bdbdbd,stop:1 #9e9e9e);
+                    border-radius:6px;padding:2px 6px;font-weight:bold;""")
 
         elif t == "文本输入":
             txt = p.get("text", "")
@@ -327,11 +381,87 @@ font-weight:bold;""")
             time_label.setText(f"{delay} ms")
             icon_label.setText("⌨")
         elif t == "拖拽":
-            sx, sy = p.get("start_x", 0), p.get("start_y", 0)
-            ex, ey = p.get("end_x", 0), p.get("end_y", 0)
-            content_label.setText(f"({sx},{sy})→({ex},{ey})")
-            icon_label.setText("✋")
+            use_image = p.get("use_image", True)
+            # 清除可能存在的旧图片
+            icon_label.setText("")
+            icon_label.setPixmap(QPixmap())
 
+            if use_image:
+                img_path = p.get("image_path", "")
+                # 根据拖拽方向确定显示文本
+                dx, dy = p.get("drag_x", 0), p.get("drag_y", 100)
+                if dx == 0 and dy > 0:
+                    content_label.setText("↓下拉")
+                    content_label.setStyleSheet("""color:#ffffff;
+                            background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #a8c0ff,stop:1 #a8c0ff);
+                            border-radius:6px;padding:2px 6px;font-weight:bold;""")
+                elif dx == 0 and dy < 0:
+                    content_label.setText("↑上拉")
+                    content_label.setStyleSheet("""color:#ffffff;
+                            background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #d4fc79,stop:1 #96e6a1);
+                            border-radius:6px;padding:2px 6px;font-weight:bold;""")
+                elif dx > 0 and dy == 0:
+                    content_label.setText("→右拉")
+                    content_label.setStyleSheet("""color:#ffffff;
+                            background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #f6d365,stop:1 #fda085);
+                            border-radius:6px;padding:2px 6px;font-weight:bold;""")
+                elif dx < 0 and dy == 0:
+                    content_label.setText("←左拉")
+                    content_label.setStyleSheet("""color:#ffffff;
+                            background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #84fab0,stop:1 #8fd3f4);
+                            border-radius:6px;padding:2px 6px;font-weight:bold;""")
+                else:
+                    content_label.setText(f"图像拖拽 ({dx},{dy})")
+                    content_label.setStyleSheet("""color:#ffffff;
+                            background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #fbc2eb,stop:1 #a6c1ee);
+                            border-radius:6px;padding:2px 6px;font-weight:bold;""")
+                if not use_color:
+                    content_label.setStyleSheet("""color:#ffffff;
+                        background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #e5e5e5,stop:0.5 #bdbdbd,stop:1 #9e9e9e);
+                        border-radius:6px;padding:2px 6px;font-weight:bold;""")
+
+
+                # 在icon_label中显示图片缩略图
+                if os.path.isfile(img_path):
+                    pm = QPixmap(img_path).scaledToHeight(StepTableHelper.ICON_SIZE, Qt.SmoothTransformation)
+                    icon_label.setPixmap(pm)
+                else:
+                    icon_label.setText("✋")  # 图片不存在时显示手型图标
+            else:
+                sx, sy = p.get("start_x", 0), p.get("start_y", 0)
+                ex, ey = p.get("end_x", 0), p.get("end_y", 0)
+                # 根据坐标变化显示箭头
+                dx, dy = ex - sx, ey - sy
+                if dx == 0 and dy > 0:
+                    content_label.setText("↓下拉")
+                    content_label.setStyleSheet("""color:#ffffff;
+                            background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #a8c0ff,stop:1 #a8c0ff);
+                            border-radius:6px;padding:2px 6px;font-weight:bold;""")
+                elif dx == 0 and dy < 0:
+                    content_label.setText("↑上拉")
+                    content_label.setStyleSheet("""color:#ffffff;
+                            background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #d4fc79,stop:1 #96e6a1);
+                            border-radius:6px;padding:2px 6px;font-weight:bold;""")
+                elif dx > 0 and dy == 0:
+                    content_label.setText("→右拉")
+                    content_label.setStyleSheet("""color:#ffffff;
+                            background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #f6d365,stop:1 #fda085);
+                            border-radius:6px;padding:2px 6px;font-weight:bold;""")
+                elif dx < 0 and dy == 0:
+                    content_label.setText("←左拉")
+                    content_label.setStyleSheet("""color:#ffffff;
+                            background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #84fab0,stop:1 #8fd3f4);
+                            border-radius:6px;padding:2px 6px;font-weight:bold;""")
+                else:
+                    content_label.setText(f"坐标拖拽 ({sx},{sy})→({ex},{ey})")
+                    content_label.setStyleSheet("""color:#ffffff;
+                            background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #fbc2eb,stop:1 #a6c1ee);
+                            border-radius:6px;padding:2px 6px;font-weight:bold;""")
+                if not use_color:
+                    content_label.setStyleSheet("""color:#ffffff;
+                        background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #e5e5e5,stop:0.5 #bdbdbd,stop:1 #9e9e9e);
+                        border-radius:6px;padding:2px 6px;font-weight:bold;""")
+                icon_label.setText("✋")
         else:
             content_label.setText(t)
             icon_label.setText("?")
@@ -363,6 +493,96 @@ font-weight:bold;""")
         lay.setContentsMargins(2, 2, 2, 2)
         lay.addWidget(label)
         return w
+
+    @staticmethod
+    def type_widget(step_type: str, use_color: bool = True) -> QWidget:
+        """
+        创建一个用于显示步骤类型的QWidget容器，可以直接添加到表格中
+
+        Args:
+            step_type: 步骤类型
+            use_color: 是否使用彩色样式，False时使用黑灰色调样式
+
+        Returns:
+            QWidget: 包含类型标签的容器
+        """
+        # 创建主容器
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(4, 2, 4, 2)
+        layout.setAlignment(Qt.AlignCenter)
+
+        # 创建类型标签
+        type_label = QLabel(step_type)
+        type_label.setAlignment(Qt.AlignCenter)
+
+        # 设置样式
+        if not use_color:
+            # 统一使用黑灰色调
+            type_label.setStyleSheet("""color:#ffffff;
+    background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #555555,stop:0.5 #777777,stop:1 #999999);
+    border-radius:6px;
+    padding:2px 6px;
+    font-weight:bold;""")
+        else:
+            # 根据不同类型返回不同颜色样式
+            styles = {
+                "鼠标点击": """color:#ffffff;
+    background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #a8c0ff,stop:1 #a8c0ff);
+    border-radius:6px;
+    padding:2px 6px;
+    font-weight:bold;""",
+
+                "文本输入": """color:#ffffff;
+    background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #d4fc79,stop:1 #96e6a1);
+    border-radius:6px;
+    padding:2px 6px;
+    font-weight:bold;""",
+
+                "等待": """color:#ffffff;
+    background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #f6d365,stop:1 #fda085);
+    border-radius:6px;
+    padding:2px 6px;
+    font-weight:bold;""",
+
+                "截图": """color:#ffffff;
+    background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #84fab0,stop:1 #8fd3f4);
+    border-radius:6px;
+    padding:2px 6px;
+    font-weight:bold;""",
+
+                "拖拽": """color:#ffffff;
+    background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #fbc2eb,stop:1 #a6c1ee);
+    border-radius:6px;
+    padding:2px 6px;
+    font-weight:bold;""",
+
+                "鼠标滚轮": """color:#ffffff;
+    background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #a6c0fe,stop:1 #f68084);
+    border-radius:6px;
+    padding:2px 6px;
+    font-weight:bold;""",
+
+                "键盘热键": """color:#ffffff;
+    background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #d299c2,stop:1 #fef9d7);
+    border-radius:6px;
+    padding:2px 6px;
+    font-weight:bold;"""
+            }
+
+            # 设置对应样式或默认样式
+            style = styles.get(step_type, """color:#ffffff;
+    background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #e5e5e5,stop:0.5 #bdbdbd,stop:1 #9e9e9e);
+    border-radius:6px;
+    padding:2px 6px;
+    font-weight:bold;""")
+            type_label.setStyleSheet(style)
+
+        # 添加到布局
+        layout.addWidget(type_label)
+
+        return container
+
 
 class ATIcon:
     """
@@ -1016,11 +1236,51 @@ class TaskRunner(QObject):
             raise
 
     def execute_drag(self, params):
-        start_x = params.get("start_x", 0)
-        start_y = params.get("start_y", 0)
-        end_x = params.get("end_x", 0)
-        end_y = params.get("end_y", 0)
+        use_image = params.get("use_image", True)
         duration = params.get("duration", 1.0)
+
+        if use_image:
+            # 使用图像识别定位起始点
+            image_path = params.get("image_path", "")
+            offset_x = params.get("offset_x", 0)
+            offset_y = params.get("offset_y", 0)
+            drag_x = params.get("drag_x", 0)  # 相对拖拽距离
+            drag_y = params.get("drag_y", 100)  # 默认向下拖拽100像素
+            confidence = params.get("confidence", 0.8)
+            timeout = self.timeout
+
+            if not image_path:
+                raise ValueError("图像路径不能为空")
+
+            def find_image_center():
+                start = time.time()
+                while True:
+                    pos = pyautogui.locateCenterOnScreen(image_path, confidence=confidence)
+                    if pos:
+                        return pos
+                    if time.time() - start > timeout:
+                        return None
+                    time.sleep(0.2)
+
+            center = find_image_center()
+            if center is None:
+                if self.auto_skip_image_timeout:
+                    self.log_message.emit(self.task_name, f"⚠️ 在 {timeout}s 内未找到图片: {os.path.basename(image_path)}，自动跳过")
+                    return  # ✅ 跳过，不抛异常
+                else:
+                    raise RuntimeError(f"在 {timeout}s 内未找到图片: {image_path}")
+
+            start_x = center.x + offset_x
+            start_y = center.y + offset_y
+            end_x = start_x + drag_x
+            end_y = start_y + drag_y
+
+        else:
+            # 使用直接坐标
+            start_x = params.get("start_x", 0)
+            start_y = params.get("start_y", 0)
+            end_x = params.get("end_x", 0)
+            end_y = params.get("end_y", 0)
 
         self.log_message.emit(self.task_name,
                               f"↔️ 从 ({start_x}, {start_y}) 拖拽到 ({end_x}, {end_y}), 时长: {duration}秒")
@@ -1282,11 +1542,9 @@ class StepConfigDialog(QDialog):
             self.show()
             return
 
-
         pixmap = QApplication.primaryScreen().grabWindow(
             0, geo.x(), geo.y(), geo.width(), geo.height()
         )
-
         img_dir = os.path.join(os.getcwd(), "img")
         # img_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "img")
         os.makedirs(img_dir, exist_ok=True)
@@ -1295,6 +1553,7 @@ class StepConfigDialog(QDialog):
 
         if pixmap.save(file_path, "PNG"):
             self.image_path_edit.setText(file_path)
+            self.drag_image_path_edit.setText(file_path)
             QMessageBox.information(self, "框选截图成功", f"已保存：{file_name}")
             # 直接调用 add_step_to_table
             step_data = self.get_step_data()
@@ -1302,8 +1561,6 @@ class StepConfigDialog(QDialog):
             # 添加到当前任务配置
             if parent.current_task and parent.current_task in parent.tasks:
                 parent.tasks[parent.current_task]["steps"].append(step_data)
-
-
         else:
             QMessageBox.warning(self, "失败", "截图保存失败！")
 
@@ -1553,46 +1810,179 @@ class StepConfigDialog(QDialog):
 
         return panel
 
+    # 在 StepConfigDialog 类中添加新的拖拽面板
     def create_drag_panel(self):
         panel = QWidget()
-        layout = QGridLayout(panel)
+        layout = QVBoxLayout(panel)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        # 起点坐标
-        layout.addWidget(QLabel("起点坐标:"), 0, 0)
+        # 添加图像识别选项
+        self.use_image_checkbox = QCheckBox("使用图像识别定位起始点")
+        self.use_image_checkbox.setChecked(True)
+        layout.addWidget(self.use_image_checkbox)
 
-        layout.addWidget(QLabel("X:"), 1, 0)
+        # 图像路径设置
+        image_layout = QHBoxLayout()
+        image_layout.addWidget(QLabel("起始点图像:"))
+        self.drag_image_path_edit = QLineEdit()
+        image_browse_btn = QPushButton("浏览...")
+        image_browse_btn.clicked.connect(self.browse_drag_image)
+
+        # >>> 新增：一键录制按钮
+        record_btn = QPushButton("框选截图")
+        record_btn.clicked.connect(self.capture_region)
+
+        image_layout.addWidget(self.drag_image_path_edit)
+        image_layout.addWidget(image_browse_btn)
+        image_layout.addWidget(record_btn)
+        layout.addLayout(image_layout)
+
+        # 偏移量设置
+        offset_layout = QHBoxLayout()
+        offset_layout.addWidget(QLabel("图像识别偏移:"))
+        offset_layout.addWidget(QLabel("X:"))
+        self.drag_offset_x_spin = QSpinBox()
+        self.drag_offset_x_spin.setRange(-1000, 1000)
+        offset_layout.addWidget(self.drag_offset_x_spin)
+
+        offset_layout.addWidget(QLabel("Y:"))
+        self.drag_offset_y_spin = QSpinBox()
+        self.drag_offset_y_spin.setRange(-1000, 1000)
+        offset_layout.addWidget(self.drag_offset_y_spin)
+        offset_layout.addStretch()
+        layout.addLayout(offset_layout)
+
+        # 拖拽距离（相对拖拽）
+        distance_layout = QHBoxLayout()
+        distance_layout.addWidget(QLabel("横向距离:"))
+        self.drag_distance_x_spin = QSpinBox()
+        self.drag_distance_x_spin.setRange(-1000, 1000)
+        self.drag_distance_x_spin.setValue(0)
+        distance_layout.addWidget(self.drag_distance_x_spin)
+
+        distance_layout.addWidget(QLabel("纵向距离:"))
+        self.drag_distance_y_spin = QSpinBox()
+        self.drag_distance_y_spin.setRange(-1000, 1000)
+        self.drag_distance_y_spin.setValue(100)  # 默认向下拖拽100像素
+        distance_layout.addWidget(self.drag_distance_y_spin)
+
+        # 添加快捷按钮
+        up_btn = QPushButton("↑上拉")
+        up_btn.setFixedSize(60, 25)
+        up_btn.clicked.connect(lambda: self.set_drag_distance(0, -100))
+        distance_layout.addWidget(up_btn)
+
+        down_btn = QPushButton("↓下拉")
+        down_btn.setFixedSize(60, 25)
+        down_btn.clicked.connect(lambda: self.set_drag_distance(0, 100))
+        distance_layout.addWidget(down_btn)
+
+        left_btn = QPushButton("←左拉")
+        left_btn.setFixedSize(60, 25)
+        left_btn.clicked.connect(lambda: self.set_drag_distance(-100, 0))
+        distance_layout.addWidget(left_btn)
+
+        right_btn = QPushButton("→右拉")
+        right_btn.setFixedSize(60, 25)
+        right_btn.clicked.connect(lambda: self.set_drag_distance(100, 0))
+        distance_layout.addWidget(right_btn)
+
+        distance_layout.addStretch()
+        layout.addLayout(distance_layout)
+
+        # 识别设置
+        recognition_layout = QHBoxLayout()
+        recognition_layout.addWidget(QLabel("识别精度(0-1):"))
+        self.drag_confidence_spin = QDoubleSpinBox()
+        self.drag_confidence_spin.setRange(0.5, 1.0)
+        self.drag_confidence_spin.setValue(0.8)
+        self.drag_confidence_spin.setSingleStep(0.05)
+        recognition_layout.addWidget(self.drag_confidence_spin)
+
+        recognition_layout.addWidget(QLabel("超时时间(秒):"))
+        self.drag_timeout_spin = QDoubleSpinBox()
+        self.drag_timeout_spin.setRange(0.1, 60)
+        self.drag_timeout_spin.setSingleStep(0.1)
+        self.drag_timeout_spin.setValue(10.0)
+        self.drag_timeout_spin.setDecimals(1)
+        recognition_layout.addWidget(self.drag_timeout_spin)
+        layout.addLayout(recognition_layout)
+
+        # 分隔线
+        separator = QFrame()
+        separator.setFrameShape(QFrame.HLine)
+        separator.setFrameShadow(QFrame.Sunken)
+        layout.addWidget(separator)
+
+        # 直接坐标设置（可选）
+        direct_coords_group = QGroupBox("或直接设置坐标")
+        self.direct_coords_group = direct_coords_group
+        direct_layout = QHBoxLayout()
+
+        # 起点坐标
+        start_layout = QHBoxLayout()
+        start_layout.addWidget(QLabel("起点:"))
+        start_layout.addWidget(QLabel("X:"))
         self.drag_start_x_spin = QSpinBox()
         self.drag_start_x_spin.setRange(0, 10000)
-        layout.addWidget(self.drag_start_x_spin, 1, 1)
+        start_layout.addWidget(self.drag_start_x_spin)
 
-        layout.addWidget(QLabel("Y:"), 1, 2)
+        start_layout.addWidget(QLabel("Y:"))
         self.drag_start_y_spin = QSpinBox()
         self.drag_start_y_spin.setRange(0, 10000)
-        layout.addWidget(self.drag_start_y_spin, 1, 3)
+        start_layout.addWidget(self.drag_start_y_spin)
 
         # 终点坐标
-        layout.addWidget(QLabel("终点坐标:"), 2, 0)
-
-        layout.addWidget(QLabel("X:"), 3, 0)
+        end_layout = QHBoxLayout()
+        end_layout.addWidget(QLabel("终点:"))
+        end_layout.addWidget(QLabel("X:"))
         self.drag_end_x_spin = QSpinBox()
         self.drag_end_x_spin.setRange(0, 10000)
-        layout.addWidget(self.drag_end_x_spin, 3, 1)
+        end_layout.addWidget(self.drag_end_x_spin)
 
-        layout.addWidget(QLabel("Y:"), 3, 2)
+        end_layout.addWidget(QLabel("Y:"))
         self.drag_end_y_spin = QSpinBox()
         self.drag_end_y_spin.setRange(0, 10000)
-        layout.addWidget(self.drag_end_y_spin, 3, 3)
+        end_layout.addWidget(self.drag_end_y_spin)
+
+        direct_layout.addLayout(start_layout)
+        direct_layout.addLayout(end_layout)
+        direct_coords_group.setLayout(direct_layout)
+        layout.addWidget(direct_coords_group)
+
 
         # 拖拽时间
-        layout.addWidget(QLabel("拖拽时间(秒):"), 4, 0)
+        time_layout = QHBoxLayout()
+        time_layout.addWidget(QLabel("拖拽时间(秒):"))
         self.drag_duration_spin = QDoubleSpinBox()
         self.drag_duration_spin.setRange(0.1, 10.0)
         self.drag_duration_spin.setValue(1.0)
         self.drag_duration_spin.setSingleStep(0.1)
-        layout.addWidget(self.drag_duration_spin, 4, 1)
+        time_layout.addWidget(self.drag_duration_spin)
+        layout.addLayout(time_layout)
+
+        # 连接信号
+        self.use_image_checkbox.toggled.connect(self.toggle_drag_mode)
+        self.toggle_drag_mode(True)
 
         return panel
+
+    def set_drag_distance(self, x_distance, y_distance):
+        """设置拖拽距离的快捷方法"""
+        self.drag_distance_x_spin.setValue(x_distance)
+        self.drag_distance_y_spin.setValue(y_distance)
+
+    def toggle_drag_mode(self, use_image):
+        """切换拖拽模式"""
+        self.direct_coords_group.setDisabled(use_image)
+
+    def browse_drag_image(self):
+        """浏览拖拽起始点图像"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "选择起始点图像", "", "图片文件 (*.png *.jpg *.bmp)"
+        )
+        if file_path:
+            self.drag_image_path_edit.setText(file_path)
 
     def browse_image(self):
         file_path, _ = QFileDialog.getOpenFileName(
@@ -1672,10 +2062,21 @@ class StepConfigDialog(QDialog):
                 self.screenshot_width_spin.setValue(region[2])
                 self.screenshot_height_spin.setValue(region[3])
         elif step_type == "拖拽":
-            self.drag_start_x_spin.setValue(params.get("start_x", 0))
-            self.drag_start_y_spin.setValue(params.get("start_y", 0))
-            self.drag_end_x_spin.setValue(params.get("end_x", 0))
-            self.drag_end_y_spin.setValue(params.get("end_y", 0))
+            use_image = params.get("use_image", True)
+            self.use_image_checkbox.setChecked(use_image)
+            if use_image:
+                self.drag_image_path_edit.setText(params.get("image_path", ""))
+                self.drag_offset_x_spin.setValue(params.get("offset_x", 0))
+                self.drag_offset_y_spin.setValue(params.get("offset_y", 0))
+                self.drag_distance_x_spin.setValue(params.get("drag_x", 0))
+                self.drag_distance_y_spin.setValue(params.get("drag_y", 100))
+                self.drag_confidence_spin.setValue(params.get("confidence", 0.8))
+                self.drag_timeout_spin.setValue(params.get("timeout", 10.0))
+            else:
+                self.drag_start_x_spin.setValue(params.get("start_x", 0))
+                self.drag_start_y_spin.setValue(params.get("start_y", 0))
+                self.drag_end_x_spin.setValue(params.get("end_x", 0))
+                self.drag_end_y_spin.setValue(params.get("end_y", 0))
             self.drag_duration_spin.setValue(params.get("duration", 1.0))
         elif step_type == "鼠标滚轮":
             self.scroll_direction_combo.setCurrentText(params.get("direction", "向下滚动"))
@@ -1727,13 +2128,28 @@ class StepConfigDialog(QDialog):
                 ]
             }
         elif step_type == "拖拽":
+            use_image = self.use_image_checkbox.isChecked()
             params = {
-                "start_x": self.drag_start_x_spin.value(),
-                "start_y": self.drag_start_y_spin.value(),
-                "end_x": self.drag_end_x_spin.value(),
-                "end_y": self.drag_end_y_spin.value(),
+                "use_image": use_image,
                 "duration": self.drag_duration_spin.value()
             }
+            if use_image:
+                params.update({
+                    "image_path": self.drag_image_path_edit.text(),
+                    "offset_x": self.drag_offset_x_spin.value(),
+                    "offset_y": self.drag_offset_y_spin.value(),
+                    "drag_x": self.drag_distance_x_spin.value(),
+                    "drag_y": self.drag_distance_y_spin.value(),
+                    "confidence": self.drag_confidence_spin.value(),
+                    "timeout": self.drag_timeout_spin.value()
+                })
+            else:
+                params.update({
+                    "start_x": self.drag_start_x_spin.value(),
+                    "start_y": self.drag_start_y_spin.value(),
+                    "end_x": self.drag_end_x_spin.value(),
+                    "end_y": self.drag_end_y_spin.value()
+                })
         elif step_type == "鼠标滚轮":
             params = {
                 "direction": self.scroll_direction_combo.currentText(),
@@ -2147,9 +2563,6 @@ class AutomationUI(QMainWindow):
         self.steps_table.horizontalHeader().setStretchLastSection(True)
         self.steps_table.verticalHeader().setVisible(False)
         self.steps_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-
-        # 添加示例数据
-        # self.populate_steps_table()
 
         # 步骤操作按钮 - 添加emoji和快捷键
         step_btn_layout = QHBoxLayout()
@@ -2606,6 +3019,14 @@ class AutomationUI(QMainWindow):
         minimize_layout.addWidget(self.minimize_during_execution_checkbox)
         minimize_layout.addStretch()
 
+        # 4. label颜色设置（新增）
+        label_color_layout = QHBoxLayout()
+        self.label_color_checkbox = QCheckBox("开启步骤表格的五彩色")
+        self.label_color_checkbox.setChecked(True)  # 默认勾选
+
+        label_color_layout.addWidget(self.label_color_checkbox)
+        label_color_layout.addStretch()
+
         # 连接 checkbox 控制 spinbox 启用状态
         def on_instant_click_toggled(checked):
             self.move_duration_spinbox.setEnabled(not checked)
@@ -2621,6 +3042,7 @@ class AutomationUI(QMainWindow):
         settings_layout.addLayout(timeout_layout)
         settings_layout.addLayout(mouse_layout)
         settings_layout.addLayout(minimize_layout)  # 添加新行
+        settings_layout.addLayout(label_color_layout)  # 添加新行
 
         # 包装为菜单项
         action = QWidgetAction(settings_menu)
@@ -2873,6 +3295,9 @@ class AutomationUI(QMainWindow):
             自动化：🤖 PyAutoGUI + 🔍 OpenCV</p>
             <p><b>Q: 开发时长？</b><br>
             A: 核心功能实现 2 days 不过一直在断断续续完善UI和修复各种bug 也欢迎大家参与到源码的开发</p>
+            <p><b>Q: pyautogui在定位图片位置时，若屏幕中有两个相同的图片，它会选择哪一个图片？？</b><br>
+            A: “谁最靠左上角，谁就中标；后面的即使一模一样也不会被理会。”
+如果你想把所有相同图标都找出来，就必须用 locateAllOnScreen()，它会返回一个可迭代对象，里面包含所有匹配区域的坐标盒（left, top, width, height），顺序同样是先上后下、先左后右。（TODO）</p>
         """)
 
         layout.addWidget(text)
@@ -3049,9 +3474,12 @@ class AutomationUI(QMainWindow):
         row = self.steps_table.rowCount()
         self.steps_table.insertRow(row)
 
-        self.steps_table.setItem(row, 0, QTableWidgetItem(step["type"]))
+        # self.steps_table.setItem(row, 0, QTableWidgetItem(step["type"]))
         # self.steps_table.setItem(row, 1, QTableWidgetItem(StepTableHelper.desc_of(step)))
-        w = StepTableHelper.widget_of(step)
+        use_color = self.label_color_checkbox.isChecked() if hasattr(self, 'label_color_checkbox') else True
+        type_widget = StepTableHelper.type_widget(step["type"], use_color)
+        self.steps_table.setCellWidget(row, 0, type_widget)
+        w = StepTableHelper.widget_of(step,use_color)
         self.steps_table.setCellWidget(row, 1, w)
         self.steps_table.setRowHeight(row, max(StepTableHelper.IMG_HEIGHT + 4, 24))
         self.steps_table.verticalHeader().setDefaultSectionSize(
@@ -3062,7 +3490,7 @@ class AutomationUI(QMainWindow):
         # 格式化参数显示
         params_text = ""
         if step["type"] == "鼠标点击":
-            params_text = f"图片: {os.path.basename(step['params'].get('image_path', ''))}"
+            params_text = f"图片: {os.path.basename(step['params'].get('image_path', ''))},点击类型: {step['params'].get('click_type', '')}"
         elif step["type"] == "文本输入":
             params_text = f"文本: {step['params'].get('text', 'excel表内容')}"
         elif step["type"] == "等待":
@@ -3076,7 +3504,22 @@ class AutomationUI(QMainWindow):
             delay = step["params"].get("delay_ms", 100)
             params_text = f"键盘热键: {hotkey}, 延时 {delay} ms"
         elif step["type"] == "拖拽":
-            params_text = f"从({step['params'].get('start_x', 0)},{step['params'].get('start_y', 0)})到({step['params'].get('end_x', 0)},{step['params'].get('end_y', 0)})"
+            use_image = step['params'].get('use_image', True)
+            if use_image:
+                img_path = step['params'].get('image_path', '')
+                if img_path:
+                    img_name = os.path.basename(img_path)
+                    dx = step['params'].get('drag_x', 0)
+                    dy = step['params'].get('drag_y', 0)
+                    params_text = f"图片: {img_name} (横向距离{dx},纵向距离{dy})"
+                else:
+                    params_text = "图片: 未设置"
+            else:
+                start_x = step['params'].get('start_x', 0)
+                start_y = step['params'].get('start_y', 0)
+                end_x = step['params'].get('end_x', 0)
+                end_y = step['params'].get('end_y', 0)
+                params_text = f"从({start_x},{start_y})到({end_x},{end_y})"
 
         self.steps_table.setItem(row, 2, QTableWidgetItem(params_text))
         self.steps_table.setItem(row, 3, QTableWidgetItem(str(step.get("delay", 0))))
@@ -3240,7 +3683,7 @@ class AutomationUI(QMainWindow):
                 count = int(repeat_text)
                 self.task_runner.set_repeat_count(count)
         # 连接信号
-        # self.task_runner.task_completed.connect(self.on_task_completed)
+        self.task_runner.task_completed.connect(self.on_task_completed)
         self.task_runner.task_progress.connect(self.on_task_progress)
         self.task_runner.log_message.connect(self.on_log_message)  # 连接日志信号
 
@@ -3369,7 +3812,7 @@ class AutomationUI(QMainWindow):
                 break
 
         # 记录日志
-        self.log_text.appendPlainText(f"[{time.strftime('%H:%M:%S')}] {message}")
+        # self.log_text.appendPlainText(f"[{time.strftime('%H:%M:%S')}] {message}")
 
     def on_task_progress(self, task_name, current, total):
         self.task_status.setText(f"运行中 ({current}/{total})")
@@ -3881,17 +4324,26 @@ class AutomationUI(QMainWindow):
         dialog = StepConfigDialog(step_data,parent=self)
         if dialog.exec() == QDialog.Accepted:
             new_step_data = dialog.get_step_data()
-
             # 更新表格
-            self.steps_table.setItem(selected_row, 0, QTableWidgetItem(new_step_data["type"]))
-
+            use_color = self.label_color_checkbox.isChecked() if hasattr(self, 'label_color_checkbox') else True
+            type_widget = StepTableHelper.type_widget(new_step_data["type"], use_color)
+            self.steps_table.setCellWidget(selected_row, 0, type_widget)
+            # self.steps_table.setItem(selected_row, 0, QTableWidgetItem(new_step_data["type"]))
+            w = StepTableHelper.widget_of(new_step_data,use_color)
+            self.steps_table.setCellWidget(selected_row, 1, w)
+            self.steps_table.setRowHeight(selected_row, max(StepTableHelper.IMG_HEIGHT + 4, 24))
+            self.steps_table.verticalHeader().setDefaultSectionSize(
+                StepTableHelper.FIXED_ROW_HEIGHT
+            )
+            self.steps_table.horizontalHeader().setStretchLastSection(True)
             # 格式化参数显示
             params_text = ""
             params = new_step_data["params"]
             if new_step_data["type"] == "鼠标点击":
                 img_path = new_step_data['params'].get('image_path', '')
+                click_type = new_step_data['params'].get('click_type', '')
                 img_name = os.path.basename(img_path)  # 去掉目录，只剩文件名
-                params_text = f"图片: {img_name}"
+                params_text = f"图片: {img_name} 点击类型: {click_type}"
             elif new_step_data["type"] == "文本输入":
                 # 优先显示纯文本
                 txt = params.get("text", "")
@@ -3909,8 +4361,22 @@ class AutomationUI(QMainWindow):
             elif new_step_data["type"] == "截图":
                 params_text = f"保存到: {new_step_data['params'].get('save_path', '')}"
             elif new_step_data["type"] == "拖拽":
-                params_text = f"从({new_step_data['params'].get('start_x', 0)},{new_step_data['params'].get('start_y', 0)})到({new_step_data['params'].get('end_x', 0)},{new_step_data['params'].get('end_y', 0)})"
-
+                use_image = new_step_data['params'].get('use_image', True)
+                if use_image:
+                    img_path = new_step_data['params'].get('image_path', '')
+                    if img_path:
+                        img_name = os.path.basename(img_path)
+                        dx = new_step_data['params'].get('drag_x', 0)
+                        dy = new_step_data['params'].get('drag_y', 0)
+                        params_text = f"图片: {img_name} (+{dx},+{dy})"
+                    else:
+                        params_text = "图片: 未设置"
+                else:
+                    start_x = new_step_data['params'].get('start_x', 0)
+                    start_y = new_step_data['params'].get('start_y', 0)
+                    end_x = new_step_data['params'].get('end_x', 0)
+                    end_y = new_step_data['params'].get('end_y', 0)
+                    params_text = f"从({start_x},{start_y})到({end_x},{end_y})"
             self.steps_table.setItem(selected_row, 2, QTableWidgetItem(params_text))
             self.steps_table.setItem(selected_row, 3, QTableWidgetItem(str(new_step_data.get("delay", 0))))
 
