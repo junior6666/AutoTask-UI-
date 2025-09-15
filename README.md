@@ -1,6 +1,7 @@
 🎉 AutoTask-UI- ✨  
 基于 PySide6 的零代码自动化桌面操作工具原型 🚀  
-把每天都要重复的「固定步骤」抽象成可拖拽的「任务」🧩，让 PyAutoGUI 在后台帮你精确复现 🎯，还能定时调度 ⏰，一键批量管理 📦！
+把每天都要重复的「固定步骤」抽象成可拖拽的「任务」🧩
+让 PyAutoGUI 在后台帮你精确复现 🎯，还能定时调度 ⏰，一键批量管理 📦！
 交流QQ群：1057721699（可直接下载软件包）
 ---
 
@@ -35,8 +36,8 @@ git clone https://github.com/junior6666/AutoTask-UI-.git
 cd AutoTask-UI
 
 # 2️⃣ 创建虚拟环境（可选）
-python -m venv venv
-source venv/bin/activate   # Windows: venv\Scripts\activate
+conda create -n aututask-ui- python=3.11
+conda activate aututask-ui-
 
 # 3️⃣ 安装依赖
 pip install -r requirements.txt
