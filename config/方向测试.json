@@ -1,0 +1,25 @@
+{
+    "name": "\u65b0\u4efb\u52a1 4",
+    "schedule": {
+        "enable": "\u7acb\u5373\u6267\u884c",
+        "time": "15:27:56",
+        "interval": 0,
+        "repeat": "1"
+    },
+    "steps": [
+        {
+            "type": "\u9f20\u6807\u70b9\u51fb",
+            "params": {
+                "image_path": "H:/pycharm_project/AutoTask-UI-/img/20250916_150528.png",
+                "click_type": "\u53f3\u952e\u5355\u51fb",
+                "scan_direction": "\u4ece\u4e0b\u5230\u4e0a",
+                "offset_x": 0,
+                "offset_y": 0,
+                "confidence": 0.8,
+                "timeout": 1.0,
+                "step_time": "15:28:28"
+            },
+            "delay": 0
+        }
+    ]
+}

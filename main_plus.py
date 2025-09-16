@@ -355,10 +355,30 @@ font-weight:bold;""")
                 file = os.path.basename(p.get("excel_path", ""))
                 content_label.setText(f"{mode}·{file}")
             icon_label.setText("⌨")
+            # 设置低饱和度渐变背景
+            if use_color:
+                content_label.setStyleSheet("""color:#ffffff;
+                    background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #d4fc79,stop:1 #96e6a1);
+                    border-radius:6px;padding:2px 6px;font-weight:bold;""")
+            else:
+                content_label.setStyleSheet("""color:#ffffff;
+                    background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #e5e5e5,stop:0.5 #bdbdbd,stop:1 #9e9e9e);
+                    border-radius:6px;padding:2px 6px;font-weight:bold;""")
+
 
         elif t == "等待":
             content_label.setText(f"{p.get('seconds', 0)}s")
             icon_label.setText("⏱")
+            # 设置低饱和度渐变背景
+            if use_color:
+                content_label.setStyleSheet("""color:#ffffff;
+                    background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #f6d365,stop:1 #fda085);
+                    border-radius:6px;padding:2px 6px;font-weight:bold;""")
+            else:
+                content_label.setStyleSheet("""color:#ffffff;
+                    background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #e5e5e5,stop:0.5 #bdbdbd,stop:1 #9e9e9e);
+                    border-radius:6px;padding:2px 6px;font-weight:bold;""")
+
 
         elif t == "截图":
             save_path = p.get("save_path", "")
@@ -374,12 +394,31 @@ font-weight:bold;""")
             clicks = p.get("clicks", 3)
             content_label.setText(f"{dire}{clicks}格")
             icon_label.setText("⚙")
+            # 设置低饱和度渐变背景
+            if use_color:
+                content_label.setStyleSheet("""color:#ffffff;
+                    background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #a6c0fe,stop:1 #f68084);
+                    border-radius:6px;padding:2px 6px;font-weight:bold;""")
+            else:
+                content_label.setStyleSheet("""color:#ffffff;
+                    background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #e5e5e5,stop:0.5 #bdbdbd,stop:1 #9e9e9e);
+                    border-radius:6px;padding:2px 6px;font-weight:bold;""")
+
         elif t == "键盘热键":
             hotkey = p.get("hotkey", "ctrl+c").upper()
             delay = p.get("delay_ms", 100)
             content_label.setText(f"{hotkey}")
             time_label.setText(f"{delay} ms")
             icon_label.setText("⌨")
+            # 设置低饱和度渐变背景
+            if use_color:
+                content_label.setStyleSheet("""color:#ffffff;
+                    background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #d299c2,stop:1 #fef9d7);
+                    border-radius:6px;padding:2px 6px;font-weight:bold;""")
+            else:
+                content_label.setStyleSheet("""color:#ffffff;
+                    background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #e5e5e5,stop:0.5 #bdbdbd,stop:1 #9e9e9e);
+                    border-radius:6px;padding:2px 6px;font-weight:bold;""")
         elif t == "拖拽":
             use_image = p.get("use_image", True)
             # 清除可能存在的旧图片
@@ -504,13 +543,32 @@ font-weight:bold;""")
             use_color: 是否使用彩色样式，False时使用黑灰色调样式
 
         Returns:
-            QWidget: 包含类型标签的容器
+            QWidget: 包含图标和类型标签的容器
         """
         # 创建主容器
         container = QWidget()
         layout = QHBoxLayout(container)
         layout.setContentsMargins(4, 2, 4, 2)
         layout.setAlignment(Qt.AlignCenter)
+
+        # 创建图标标签
+        icon_label = QLabel()
+        icon_label.setAlignment(Qt.AlignCenter)
+        icon_label.setStyleSheet("font-size: 14px; margin-right: 5px;")
+
+        # 根据步骤类型设置对应图标
+        icons = {
+            "鼠标点击": "🖱️",
+            "文本输入": "⌨️",
+            "等待": "⏱️",
+            "截图": "📸",
+            "拖拽": "✋",
+            "鼠标滚轮": "🖱️",  # 使用相同图标但可以区分
+            "键盘热键": "⌨️"
+        }
+
+        icon_text = icons.get(step_type, "❓")  # 默认问号图标
+        icon_label.setText(icon_text)
 
         # 创建类型标签
         type_label = QLabel(step_type)
@@ -579,6 +637,7 @@ font-weight:bold;""")
             type_label.setStyleSheet(style)
 
         # 添加到布局
+        layout.addWidget(icon_label)
         layout.addWidget(type_label)
 
         return container
@@ -812,6 +871,7 @@ class TaskRunner(QObject):
     def execute_mouse_click(self, params):
         image_path = params.get("image_path", "")
         click_type = params.get("click_type", "左键单击")
+        scan_direction = params.get("scan_direction", "默认")
         offset_x = params.get("offset_x", 0)
         offset_y = params.get("offset_y", 0)
         confidence = params.get("confidence", 0.8)
@@ -824,7 +884,7 @@ class TaskRunner(QObject):
                 return
             else:
                 raise ValueError("image_path 不能为空")
-
+        print(f"[DEBUG] 扫描方向: {scan_direction}")
         print(f"[DEBUG] 开始定位图片: {image_path}")
 
         def find_image_center():
@@ -837,7 +897,41 @@ class TaskRunner(QObject):
                     return None
                 time.sleep(0.2)
 
-        center = find_image_center()
+        def find_image_center_with_direction():
+            """
+            按指定方向返回第一个匹配图的中心坐标。
+            direction: "从左到右" | "从右到左" | "从上到下" | "从下到上"
+            """
+            start = time.time()
+            while True:
+                # 1. 拿到所有匹配框
+                boxes = list(pyautogui.locateAllOnScreen(image_path, confidence=confidence))
+                if boxes:
+                    # 2. 按方向排序
+                    if scan_direction == "从左到右":
+                        boxes.sort(key=lambda b: b.left)  # left 升序
+                    elif scan_direction == "从右到左":
+                        boxes.sort(key=lambda b: -(b.left + b.width))  # 最右在前
+                    elif scan_direction == "从上到下":
+                        boxes.sort(key=lambda b: b.top)  # top 升序
+                    elif scan_direction == "从下到上":
+                        boxes.sort(key=lambda b: -(b.top + b.height))  # 最下在前
+                    else:
+                        # 防呆，回到默认（最左上）
+                        boxes.sort(key=lambda b: (b.top, b.left))
+
+                    # 3. 取第一个框的中心
+                    target = boxes[0]
+                    x, y = pyautogui.center(target)
+                    return (x, y)
+                # 4. 超时判定
+                if time.time() - start > timeout:
+                    return None
+                time.sleep(0.2)
+        if scan_direction == "默认":
+            center = find_image_center()
+        else:
+            center = find_image_center_with_direction()
         if center is None:
             if self.auto_skip_image_timeout:
                 self.log_message.emit(self.task_name, f"⚠️ 在 {timeout}s 内未找到图片: {os.path.basename(image_path)}，自动跳过")
@@ -845,8 +939,12 @@ class TaskRunner(QObject):
             else:
                 raise RuntimeError(f"在 {timeout}s 内未找到图片: {image_path}")
 
-        target_x = center.x + offset_x
-        target_y = center.y + offset_y
+        if scan_direction == "默认":
+            target_x = center.x + offset_x
+            target_y = center.y + offset_y
+        else:
+            target_x = center[0] + offset_x
+            target_y = center[1] + offset_y
 
         if not self.instant_click:
             try:
@@ -1586,11 +1684,17 @@ class StepConfigDialog(QDialog):
         record_btn.clicked.connect(self.capture_region)
         layout.addWidget(record_btn, 0, 3)
 
-        # 点击类型
+        # 点击类型和读取方向
         layout.addWidget(QLabel("点击类型:"), 1, 0)
         self.click_type_combo = QComboBox()
         self.click_type_combo.addItems(["左键单击", "左键双击", "右键单击", "中键单击"])
-        layout.addWidget(self.click_type_combo, 1, 1, 1, 2)
+        layout.addWidget(self.click_type_combo, 1, 1)
+
+        # 图片读取方向
+        layout.addWidget(QLabel("读取方向:"), 1, 2)
+        self.scan_direction_combo = QComboBox()
+        self.scan_direction_combo.addItems(["默认","从左到右", "从右到左", "从上到下", "从下到上"])
+        layout.addWidget(self.scan_direction_combo, 1, 3)
 
         # 偏移量
         layout.addWidget(QLabel("X偏移:"), 2, 0)
@@ -1849,6 +1953,11 @@ class StepConfigDialog(QDialog):
         self.drag_offset_y_spin = QSpinBox()
         self.drag_offset_y_spin.setRange(-1000, 1000)
         offset_layout.addWidget(self.drag_offset_y_spin)
+
+        offset_layout.addWidget(QLabel("读取方向:"))
+        self.drag_scan_direction_combo = QComboBox()
+        self.drag_scan_direction_combo.addItems(["默认","从左到右", "从右到左", "从上到下", "从下到上"])
+        offset_layout.addWidget(self.drag_scan_direction_combo)
         offset_layout.addStretch()
         layout.addLayout(offset_layout)
 
@@ -2036,6 +2145,7 @@ class StepConfigDialog(QDialog):
         if step_type == "鼠标点击":
             self.image_path_edit.setText(params.get("image_path", ""))
             self.click_type_combo.setCurrentText(params.get("click_type", "左键单击"))
+            self.scan_direction_combo.setCurrentText(params.get("scan_direction", "默认"))
             self.offset_x_spin.setValue(params.get("offset_x", 0))
             self.offset_y_spin.setValue(params.get("offset_y", 0))
             self.confidence_spin.setValue(params.get("confidence", 0.8))
@@ -2068,6 +2178,7 @@ class StepConfigDialog(QDialog):
                 self.drag_image_path_edit.setText(params.get("image_path", ""))
                 self.drag_offset_x_spin.setValue(params.get("offset_x", 0))
                 self.drag_offset_y_spin.setValue(params.get("offset_y", 0))
+                self.scan_direction_combo.setCurrentText(params.get("scan_direction", "默认"))
                 self.drag_distance_x_spin.setValue(params.get("drag_x", 0))
                 self.drag_distance_y_spin.setValue(params.get("drag_y", 100))
                 self.drag_confidence_spin.setValue(params.get("confidence", 0.8))
@@ -2095,6 +2206,7 @@ class StepConfigDialog(QDialog):
             params = {
                 "image_path": self.image_path_edit.text(),
                 "click_type": self.click_type_combo.currentText(),
+                "scan_direction": self.scan_direction_combo.currentText(),
                 "offset_x": self.offset_x_spin.value(),
                 "offset_y": self.offset_y_spin.value(),
                 "confidence": self.confidence_spin.value(),
@@ -2138,6 +2250,7 @@ class StepConfigDialog(QDialog):
                     "image_path": self.drag_image_path_edit.text(),
                     "offset_x": self.drag_offset_x_spin.value(),
                     "offset_y": self.drag_offset_y_spin.value(),
+                "scan_direction": self.scan_direction_combo.currentText(),
                     "drag_x": self.drag_distance_x_spin.value(),
                     "drag_y": self.drag_distance_y_spin.value(),
                     "confidence": self.drag_confidence_spin.value(),
@@ -2161,7 +2274,7 @@ class StepConfigDialog(QDialog):
                 "delay_ms": self.hotkey_delay_spin.value()
             }
         params["step_time"] = datetime.now().strftime("%H:%M:%S")
-        # print(f"步骤数据: {params}")
+        print(f"步骤数据: {params}")
         return {
             "type": step_type,
             "params": params,
@@ -3327,8 +3440,8 @@ class AutomationUI(QMainWindow):
             "schedule": {
                 "enable": "立即执行",
                 "time": QTime.currentTime().toString("HH:mm:ss"),
-                "interval": 10,
-                "repeat": "1"
+                "interval": 0,
+                "repeat": "无限"
             },
             "steps": []
         }
@@ -3490,7 +3603,7 @@ class AutomationUI(QMainWindow):
         # 格式化参数显示
         params_text = ""
         if step["type"] == "鼠标点击":
-            params_text = f"图片: {os.path.basename(step['params'].get('image_path', ''))},点击类型: {step['params'].get('click_type', '')}"
+            params_text = f"图片: {os.path.basename(step['params'].get('image_path', ''))},点击类型: {step['params'].get('click_type', '') },方向: {step['params'].get('scan_direction', '默认')}"
         elif step["type"] == "文本输入":
             params_text = f"文本: {step['params'].get('text', 'excel表内容')}"
         elif step["type"] == "等待":
@@ -4343,7 +4456,7 @@ class AutomationUI(QMainWindow):
                 img_path = new_step_data['params'].get('image_path', '')
                 click_type = new_step_data['params'].get('click_type', '')
                 img_name = os.path.basename(img_path)  # 去掉目录，只剩文件名
-                params_text = f"图片: {img_name} 点击类型: {click_type}"
+                params_text = f"图片: {img_name} 点击类型: {click_type} 方向: {new_step_data['params'].get('scan_direction', '默认')}"
             elif new_step_data["type"] == "文本输入":
                 # 优先显示纯文本
                 txt = params.get("text", "")

@@ -1,0 +1,27 @@
+{
+    "name": "\u6253\u5730\u9f20",
+    "schedule": {
+        "enable": "\u7acb\u5373\u6267\u884c",
+        "time": "21:10:09",
+        "interval": 0,
+        "repeat": "\u65e0\u9650"
+    },
+    "steps": [
+        {
+            "type": "\u62d6\u62fd",
+            "params": {
+                "use_image": true,
+                "duration": 1.0,
+                "image_path": "H:/pycharm_project/AutoTask-UI-/img/20250914_210636.png",
+                "offset_x": 0,
+                "offset_y": 0,
+                "drag_x": 0,
+                "drag_y": 100,
+                "confidence": 0.8,
+                "timeout": 10.0,
+                "step_time": "23:17:27"
+            },
+            "delay": 0
+        }
+    ]
+}
