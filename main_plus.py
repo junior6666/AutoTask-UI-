@@ -2395,8 +2395,13 @@ class TaskItemWidget(QWidget):
         self.stop_btn.setEnabled(False)
         # 更新主界面状态
         if self.parent:
-            self.parent.task_status.setText("已停止")
-            self.parent.stop_current_task()
+            # 检查是否是当前任务且正在定时
+            if (self.parent.current_task == self.task_name and
+                    self.task_name in self.parent.scheduled_timers):
+                self.parent.stop_current_task()
+            elif self.parent.current_task == self.task_name:
+                self.parent.task_status.setText("已停止")
+                self.parent.stop_current_task()
 
 
 class AutomationUI(QMainWindow):
@@ -3441,7 +3446,7 @@ class AutomationUI(QMainWindow):
                 "enable": "立即执行",
                 "time": QTime.currentTime().toString("HH:mm:ss"),
                 "interval": 0,
-                "repeat": "无限"
+                "repeat": "1"
             },
             "steps": []
         }
@@ -3670,12 +3675,11 @@ class AutomationUI(QMainWindow):
             # 计算延迟时间（毫秒）
             delay_ms = now.msecsTo(first_run)
 
-            # 更新UI状态
+            # 更新主界面按钮状态
             self.start_current_btn.setEnabled(False)
             self.stop_current_btn.setEnabled(True)
-            self.task_status.setText("定时执行中")
 
-            # 更新任务列表中的状态
+            # 更新任务列表中的状态（只更新当前任务）
             for i in range(self.task_list.count()):
                 item = self.task_list.item(i)
                 widget = self.task_list.itemWidget(item)
@@ -3706,8 +3710,8 @@ class AutomationUI(QMainWindow):
             self.log_text.appendPlainText(
                 f"[{time.strftime('%H:%M:%S')}] 已设置定时任务: {task_name} 将在 {first_run_str} 执行")
 
-            # 显示状态栏信息
-            self.statusBar().showMessage(f"定时任务已设置，将在 {first_run_str} 执行")
+            # 显示状态栏信息（不修改全局状态，只显示当前设置信息）
+            self.statusBar().showMessage(f"定时任务已设置，将在 {first_run_str} 执行 {task_name}")
 
             QMessageBox.information(self, "定时成功",
                                     f"[{time.strftime('%H:%M:%S')}] 已设置定时任务: {task_name} 将在 {first_run_str} 执行\n请保持桌面处于从不熄屏状态")
@@ -3715,7 +3719,7 @@ class AutomationUI(QMainWindow):
             return  # 如果是定时执行，直接返回，不立即执行任务
         # 立即执行任务的逻辑
         elif schedule_type == "立即执行":
-            self.execute_task_immediately()
+            self.execute_task_immediately(self.current_task)
 
     def run_task_with_countdown(self, task_name,countdown_seconds = 10):
         """执行带倒计时的任务"""
@@ -3737,7 +3741,7 @@ class AutomationUI(QMainWindow):
                     f"[{current_time}] 任务 '{task_name}' 开始执行"
                 )
                 # 实际执行任务
-                self.execute_task_immediately()
+                self.execute_task_immediately(task_name)
         # 启动倒计时
         countdown_timer.timeout.connect(update_countdown)
         countdown_timer.start()
@@ -3750,16 +3754,16 @@ class AutomationUI(QMainWindow):
         if not hasattr(self, 'countdown_timers'):
             self.countdown_timers = {}
         self.countdown_timers[task_name] = countdown_timer
-    def execute_task_immediately(self):
+    def execute_task_immediately(self,task_name):
         """立即执行任务的公共方法"""
-        if not self.current_task:
-            return
+        # if task_name not in self.current_task:
+        #     return
 
         # 清除状态栏的倒计时信息
         self.statusBar().showMessage("")
 
         # 获取任务配置
-        task_config = self.tasks.get(self.current_task, {})
+        task_config = self.tasks.get(task_name, {})
         steps = task_config.get("steps", [])
 
         if not steps:
@@ -3772,7 +3776,7 @@ class AutomationUI(QMainWindow):
         move_duration = self.move_duration_spinbox.value() if not instant_click else 0.0
 
         # 创建任务运行器
-        self.task_runner = TaskRunner(self.current_task, steps,
+        self.task_runner = TaskRunner(task_name, steps,
                                       auto_skip_image_timeout=auto_skip,
                                       timeout=timeout,
                                       instant_click=instant_click,
@@ -4567,8 +4571,14 @@ class AutomationUI(QMainWindow):
                     self.tasks[new_name] = task_config
                     self.current_task = new_name
                     break
-
-        self.export_config()
+        if self.current_task in self.tasks:
+            self.tasks[self.current_task]["schedule"] = {
+                "enable": self.schedule_enable.currentText(),
+                "time": self.schedule_time.time().toString("HH:mm:ss"),
+                "interval": self.repeat_interval.value(),
+                "repeat": self.repeat_count.currentText()
+            }
+        # self.export_config()
         # QMessageBox.information(self, "保存成功", "任务配置已保存")
 
     def export_config(self):

@@ -107,6 +107,9 @@ pyinstaller -F -w -i icon.ico --add-data "img;img;" --name AutoTask main_plus.py
 
 pyinstaller -F -w -i icon.ico --add-data "img;img" --name auto_Task2.0.2 main_plus.py
 pyinstaller -F -w -i icon.ico --add-data "img;img" --name auto_Task2.0.3 main_plus.py
+pyinstaller -F -w -i icon.ico --add-data "img;img" --name auto_Task2.0.4 main_plus.py
+pyinstaller -F -w -i icon.ico --add-data "img;img" --name auto_Task2.0.5 main_plus.py
+pyinstaller -F -w -i icon.ico --add-data "img;img" --name auto_Task2.0.6 main_plus.py
 ```
 
 ---
