@@ -4571,14 +4571,8 @@ class AutomationUI(QMainWindow):
                     self.tasks[new_name] = task_config
                     self.current_task = new_name
                     break
-        if self.current_task in self.tasks:
-            self.tasks[self.current_task]["schedule"] = {
-                "enable": self.schedule_enable.currentText(),
-                "time": self.schedule_time.time().toString("HH:mm:ss"),
-                "interval": self.repeat_interval.value(),
-                "repeat": self.repeat_count.currentText()
-            }
-        # self.export_config()
+
+        self.export_config_default()
         # QMessageBox.information(self, "保存成功", "任务配置已保存")
 
     def export_config(self):
@@ -4602,6 +4596,31 @@ class AutomationUI(QMainWindow):
                 with open(file_path, 'w') as f:
                     json.dump(self.tasks[self.current_task], f, indent=4)
                 QMessageBox.information(self, "导出成功", "任务配置已导出")
+
+    def export_config_default(self):
+        if not self.current_task:
+            return
+        if self.current_task in self.tasks:
+            self.tasks[self.current_task]["schedule"] = {
+                "enable": self.schedule_enable.currentText(),
+                "time": self.schedule_time.time().toString("HH:mm:ss"),
+                "interval": self.repeat_interval.value(),
+                "repeat": self.repeat_count.currentText()
+            }
+
+            # 创建config目录（如果不存在）
+            config_dir = os.path.join(os.getcwd(), "config")
+            os.makedirs(config_dir, exist_ok=True)
+
+            # 生成文件路径
+            file_name = f"{self.current_task}.json"
+            file_path = os.path.join(config_dir, file_name)
+
+            # 保存配置文件
+            if self.current_task in self.tasks:
+                with open(file_path, 'w') as f:
+                    json.dump(self.tasks[self.current_task], f, indent=4)
+                QMessageBox.information(self, "导出成功", f"任务配置已导出到: {file_path}")
 
     def import_config(self):
         file_path, _ = QFileDialog.getOpenFileName(
