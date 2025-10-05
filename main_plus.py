@@ -1237,10 +1237,10 @@ class TaskRunner(QObject):
 
                 today_str = today.strftime("%Y年%m月%d日")
                 if is_xmas:
-                    text = (f"今天是{today_str}第{count}个1314，我们已相恋{duration}，"
+                    text = (f"宝宝，今天是{today_str}第{count}个1314，我们已相恋{duration}，"
                             f"从圣诞夜一直走到今天，未来也要一起闪耀！🎄❤{special}")
                 else:
-                    text = (f"今天是{today_str}第{count}个1314，"
+                    text = (f"宝宝，今天是{today_str}第{count}个1314，"
                             f"我们已经相恋了{duration}，爱你❤{special}")
             else:
                 # 3. 否则从 Excel 取
@@ -1759,11 +1759,11 @@ class StepConfigDialog(QDialog):
 
         today_str = f"{today.year}年{today.month}月{today.day}日"
         if is_xmas:
-            text = (f"今天是{today_str}第{count}个1314，"
+            text = (f"宝宝，今天是{today_str}第{count}个1314，"
                     f"我们已相恋{duration}，"
                     f"从圣诞夜一直走到今天，未来也要一起闪耀！🎄❤")
         else:
-            text = (f"今天是{today_str}第{count}个1314，"
+            text = (f"宝宝，今天是{today_str}第{count}个1314，"
                     f"我们已经相恋了{duration}，爱你❤")
             if special:
                 text += f"\n{special}"
