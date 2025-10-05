@@ -1764,7 +1764,7 @@ class StepConfigDialog(QDialog):
                     f"从圣诞夜一直走到今天，未来也要一起闪耀！🎄❤")
         else:
             text = (f"宝宝，今天是{today_str}第{count}个1314，"
-                    f"我们已经相恋了{duration}，爱你❤")
+                    f"我们已经相恋了{duration}，爱你❤ ")
             if special:
                 text += f"\n{special}"
 
