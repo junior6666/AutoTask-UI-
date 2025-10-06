@@ -758,7 +758,7 @@ class ChatBot:
             doubao_ak: Optional[str] = None,
             doubao_sk: Optional[str] = None,
             doubao_endpoint_id: Optional[str] = None,
-            model: str = "moonshot-v1-8k",
+            model: str = "kimi-k2-0905-preview",
             temperature: float = 0.3,
             token_json_path: Optional[str] = None,
     ):
@@ -4037,7 +4037,14 @@ class AutomationUI(QMainWindow):
         """
         扫描 config_dir 内所有 *.json 并加载为任务
         """
-        config_dir = resource_path(config_dir)
+        # 获取配置目录的绝对路径
+        if getattr(sys, 'frozen', False):
+            # 打包后的情况：在可执行文件同级目录下查找 config
+            application_path = os.path.dirname(sys.executable)
+            config_dir = os.path.join(application_path, config_dir)
+        else:
+            # 开发环境
+            config_dir = resource_path(config_dir)
         if not os.path.isdir(config_dir):
             os.makedirs(config_dir, exist_ok=True)
             return
