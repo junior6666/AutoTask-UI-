@@ -1,15 +1,13 @@
-import itertools
 import sys
-import os
 import json
 import threading
 import time
-import uuid
 from copy import deepcopy
 from datetime import datetime, date, timedelta
 
 import openpyxl, random, itertools
 import pyautogui
+import pyperclip
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -26,13 +24,17 @@ from PySide6.QtCore import Qt, QTime, QSize, QSettings, Signal, QObject, QTimer,
 from PySide6.QtGui import QIcon, QAction, QFont, QPalette, QColor, QLinearGradient, QTextCursor, QKeySequence, QPixmap, \
     QBrush, QPainterPath, QPainter, QPen, QMouseEvent, QIntValidator
 
-import os
 from pathlib import Path
 
 from pynput import keyboard
 from pynput.keyboard import KeyCode, Key
 
+from typing import Any, TypedDict
 
+import os
+import logging
+from typing import Optional, List, Dict
+from openai import OpenAI
 # 工具函数
 def resource_path(relative_path: str) -> str:
     """打包 / 开发环境下通用的资源路径解析"""
@@ -41,6 +43,925 @@ def resource_path(relative_path: str) -> str:
     except AttributeError:
         base_path = os.path.abspath(".")   # 开发环境
     return os.path.join(base_path, relative_path)
+# 配置日志
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+
+# 在 main_plus.py 文件中添加以下代码
+
+# 替换 AITestDialog 类为以下代码
+
+class AITestDialog(QDialog):
+    """AI 测试对话框，支持 Kimi 和豆包"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("🤖 AI 测试")
+        self.setModal(True)
+        self.resize(650, 550)
+
+        # 初始化配置管理器
+        self.config_manager = ConfigManager()
+
+        # 初始化 ChatBot
+        self.chat_bot = None
+        self.current_provider = "kimi"
+        self.init_chat_bot()
+
+        self.setup_ui()
+
+    def init_chat_bot(self):
+        """初始化 ChatBot"""
+        try:
+            config = self.config_manager.load()
+
+            # 根据可用配置选择默认提供商
+            kimi_key = config.get("moonshot_api_key")
+            doubao_ak = config.get("volcano_access_key")
+            doubao_sk = config.get("volcano_secret_key")
+            doubao_endpoint = config.get("ark_endpoint_id")
+
+            # 优先使用 Kimi（如果配置了的话）
+            if kimi_key:
+                self.chat_bot = ChatBot(
+                    provider="kimi",
+                    token_json_path="./config/token.json"
+                )
+                self.current_provider = "kimi"
+            # 否则使用豆包（如果配置了的话）
+            elif all([doubao_ak, doubao_sk, doubao_endpoint]):
+                self.chat_bot = ChatBot(
+                    provider="doubao",
+                    token_json_path="./config/token.json"
+                )
+                self.current_provider = "doubao"
+            else:
+                # 如果都没有配置，尝试使用默认的 Kimi
+                self.chat_bot = ChatBot(
+                    provider="kimi",
+                    token_json_path="./config/token.json"
+                )
+                self.current_provider = "kimi"
+        except Exception as e:
+            QMessageBox.warning(self, "初始化失败", f"ChatBot 初始化失败: {str(e)}")
+
+    def setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        # 说明文本
+        intro_label = QLabel("AI 测试对话")
+        intro_label.setStyleSheet("""
+            font-size: 18px; 
+            font-weight: bold; 
+            color: #2c3e50;
+            padding: 5px 0;
+            border-bottom: 2px solid #3498db;
+            margin-bottom: 2px;
+        """)
+        layout.addWidget(intro_label)
+
+        # AI 提供商选择
+        provider_layout = QHBoxLayout()
+        provider_layout.addWidget(QLabel("AI 提供商:"))
+
+        self.provider_combo = QComboBox()
+        self.provider_combo.addItems(["Kimi", "豆包"])
+        self.provider_combo.setCurrentText("Kimi" if self.current_provider == "kimi" else "豆包")
+        self.provider_combo.currentTextChanged.connect(self.on_provider_changed)
+        provider_layout.addWidget(self.provider_combo)
+        provider_layout.addStretch()
+
+        layout.addLayout(provider_layout)
+
+        # 对话历史区域
+        history_group = QGroupBox("对话历史")
+        history_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                border: 1px solid #000000;
+                border-radius: 10px;
+                margin-top: 1ex;
+                padding-top: 2px;
+                background-color: #ffffff;
+            }
+            QGroupBox::title {
+                subline-position: top center;
+                padding: 0 2px;
+                background-color: #000000;
+                color: white;
+                border-radius: 5px;
+            }
+        """)
+        history_layout = QVBoxLayout(history_group)
+        history_layout.setContentsMargins(15, 25, 15, 15)
+
+        self.history_display = QPlainTextEdit()
+        self.history_display.setReadOnly(True)
+        self.history_display.setPlaceholderText("对话历史将显示在这里...")
+        self.history_display.setStyleSheet("""
+            QPlainTextEdit {
+                background-color: white;
+                border: 1px solid #bdc3c7;
+                border-radius: 8px;
+                padding: 2px;
+                font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+            }
+        """)
+        # 使用策略扩展，让它占据更多空间
+        self.history_display.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        # 创建一个容器来更好地控制历史显示区域
+        history_container = QWidget()
+        history_container_layout = QVBoxLayout(history_container)
+        history_container_layout.setContentsMargins(0, 0, 0, 0)
+        history_container_layout.addWidget(self.history_display)
+
+        history_layout.addWidget(history_container)
+        layout.addWidget(history_group)
+
+        # 用户输入区域
+        input_group = QGroupBox("用户输入")
+        input_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                border: 1px solid #000000;
+                border-radius: 10px;
+                margin-top: 1ex;
+                padding-top: 2px;
+                background-color: #ffffff;
+            }
+            QGroupBox::title {
+                subline-position: top center;
+                padding: 0 2px;
+                background-color: #000000;
+                color: white;
+                border-radius: 5px;
+            }
+        """)
+        input_layout = QVBoxLayout(input_group)
+        input_layout.setContentsMargins(15, 25, 15, 15)
+
+        self.user_input_edit = QTextEdit()
+        self.user_input_edit.setMaximumHeight(180)
+        self.user_input_edit.setPlaceholderText("请输入要发送给 AI 的消息...")
+        self.user_input_edit.setStyleSheet("""
+            QTextEdit {
+                background-color: white;
+                border: 1px solid #bdc3c7;
+                border-radius: 8px;
+                padding: 10px;
+                font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+            }
+        """)
+        input_layout.addWidget(self.user_input_edit)
+
+        # 按钮布局
+        button_layout = QHBoxLayout()
+        button_layout.setSpacing(15)
+        button_layout.setContentsMargins(0, 10, 0, 0)
+
+        self.clear_history_btn = QPushButton("🗑️ 清空历史")
+        self.clear_history_btn.clicked.connect(self.clear_history)
+        self.clear_history_btn.setMinimumWidth(120)
+        self.clear_history_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #95a5a6;
+                color: white;
+                border: none;
+                padding: 10px 16px;
+                border-radius: 6px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #7f8c8d;
+            }
+            QPushButton:pressed {
+                background-color: #6c7a7b;
+            }
+        """)
+        button_layout.addWidget(self.clear_history_btn)
+
+        button_layout.addStretch()
+
+        self.send_btn = QPushButton("🚀 发送消息")
+        self.send_btn.clicked.connect(self.send_message)
+        self.send_btn.setDefault(True)
+        self.send_btn.setMinimumWidth(120)
+        self.send_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3498db;
+                color: white;
+                border: none;
+                padding: 10px 16px;
+                border-radius: 6px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
+            QPushButton:pressed {
+                background-color: #21618c;
+            }
+            QPushButton:disabled {
+                background-color: #bdc3c7;
+            }
+        """)
+        button_layout.addWidget(self.send_btn)
+
+        input_layout.addLayout(button_layout)
+        layout.addWidget(input_group)
+
+        # 状态栏
+        self.status_label = QLabel("就绪")
+        self.status_label.setStyleSheet("""
+            color: #7f8c8d; 
+            font-size: 12px;
+            padding: 8px 0;
+            border-top: 1px solid #ecf0f1;
+            font-weight: bold;
+        """)
+        layout.addWidget(self.status_label)
+
+    def on_provider_changed(self, text):
+        """处理 AI 提供商更改"""
+        provider = "kimi" if text == "Kimi" else "doubao"
+        if provider != self.current_provider:
+            self.current_provider = provider
+            try:
+                self.chat_bot = ChatBot(
+                    provider=provider,
+                    token_json_path="./config/token.json"
+                )
+                self.status_label.setText(f"已切换到 {text} 提供商")
+                self.clear_history()
+            except Exception as e:
+                QMessageBox.warning(self, "切换失败", f"切换 AI 提供商失败: {str(e)}")
+                # 恢复到之前的提供商
+                self.provider_combo.setCurrentText("Kimi" if self.current_provider == "kimi" else "豆包")
+
+    def send_message(self):
+        """发送消息到 AI"""
+        if not self.chat_bot:
+            QMessageBox.warning(self, "错误", "ChatBot 未初始化")
+            return
+
+        user_message = self.user_input_edit.toPlainText().strip()
+        if not user_message:
+            QMessageBox.warning(self, "警告", "请输入消息内容")
+            return
+
+        system_prompt = "你是我的朋友，微信语音里很随和。用一句口语化的话回应我"
+
+        # 更新状态
+        self.status_label.setText("正在获取 AI 回复...")
+        self.send_btn.setEnabled(False)
+        QApplication.processEvents()
+
+        try:
+            # 发送消息并获取回复
+            reply = self.chat_bot.reply(
+                message=user_message,
+                system=system_prompt if system_prompt else None,
+                use_history=True,
+                stream=False
+            )
+
+            # 更新对话历史
+            self.update_history(f"👤 用户: {user_message}")
+            self.update_history(f"🤖 AI: {reply}")
+
+            # 清空输入框
+            self.user_input_edit.clear()
+
+            self.status_label.setText("回复成功")
+        except Exception as e:
+            error_msg = f"❌ 错误: {str(e)}"
+            self.update_history(error_msg)
+            self.status_label.setText("发送失败")
+            QMessageBox.critical(self, "发送失败", f"发送消息时出错: {str(e)}")
+        finally:
+            self.send_btn.setEnabled(True)
+
+    def update_history(self, message):
+        """更新对话历史显示"""
+        current_text = self.history_display.toPlainText()
+        if current_text:
+            current_text += "\n" + message
+        else:
+            current_text = message
+
+        self.history_display.setPlainText(current_text)
+        # 滚动到底部
+        self.history_display.verticalScrollBar().setValue(
+            self.history_display.verticalScrollBar().maximum()
+        )
+
+    def clear_history(self):
+        """清空对话历史"""
+        self.history_display.clear()
+        if self.chat_bot:
+            self.chat_bot.clear_history()
+        self.status_label.setText("历史已清空")
+
+
+# 在 main_plus.py 文件中添加以下代码
+
+class AITokenConfigDialog(QDialog):
+    """AI Token 配置对话框"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("AI Token 配置")
+        self.setModal(True)
+        self.resize(500, 400)
+
+        # 初始化配置管理器
+        self.config_manager = ConfigManager()
+
+        self.setup_ui()
+        self.load_config()
+
+    # 替换 AITokenConfigDialog 类中的 setup_ui 方法
+
+    def setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        # 说明文本 - 改为可点击链接
+        intro_text = QLabel("""
+            <p>配置AI服务所需的访问密钥：</p>
+            <ul>
+                <li><b>Kimi API Key</b>: 用于访问月之暗面的Kimi AI服务 (<a href="https://platform.moonshot.cn/console/api-keys">获取API Key</a>)</li>
+                <li><b>豆包 AccessKey/SecretKey</b>: 用于访问字节跳动的豆包AI服务 (<a href="https://www.volcengine.com/product/ark">获取豆包API</a>)</li>
+                <li><b>豆包 Endpoint ID</b>: 豆包模型的端点标识</li>
+            </ul>
+            <p>配置将保存在 <code>./config/token.json</code> 文件中</p>
+        """)
+        intro_text.setMaximumHeight(120)
+        intro_text.setStyleSheet("""
+            background-color: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            padding: 10px;
+            font-size: 11px;
+        """)
+        intro_text.setOpenExternalLinks(True)  # 允许打开外部链接
+        intro_text.setTextFormat(Qt.RichText)  # 设置为富文本格式
+        intro_text.setTextInteractionFlags(Qt.TextBrowserInteraction)  # 允许文本交互
+        layout.addWidget(intro_text)
+
+        # Kimi 配置组
+        kimi_group = QGroupBox("Kimi 配置")
+        kimi_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                border: 1px solid #dcdcdc;
+                border-radius: 8px;
+                margin-top: 1ex;
+                padding-top: 15px;
+            }
+            QGroupBox::title {
+                subline-position: top center;
+                padding: 0 10px;
+            }
+        """)
+        kimi_layout = QFormLayout(kimi_group)
+        kimi_layout.setLabelAlignment(Qt.AlignRight)
+        kimi_layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+        kimi_layout.setHorizontalSpacing(20)
+        kimi_layout.setVerticalSpacing(10)
+
+        self.kimi_api_key_edit = QLineEdit()
+        self.kimi_api_key_edit.setEchoMode(QLineEdit.Password)
+        self.kimi_api_key_edit.setPlaceholderText("请输入 Kimi API Key")
+        self.kimi_api_key_edit.setMinimumWidth(200)
+        kimi_layout.addRow("API Key:", self.kimi_api_key_edit)
+
+        layout.addWidget(kimi_group)
+
+        # 豆包配置组
+        doubao_group = QGroupBox("豆包配置")
+        doubao_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                border: 1px solid #dcdcdc;
+                border-radius: 8px;
+                margin-top: 1ex;
+                padding-top: 15px;
+            }
+            QGroupBox::title {
+                subline-position: top center;
+                padding: 0 10px;
+            }
+        """)
+        doubao_layout = QFormLayout(doubao_group)
+        doubao_layout.setLabelAlignment(Qt.AlignRight)
+        doubao_layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+        doubao_layout.setHorizontalSpacing(20)
+        doubao_layout.setVerticalSpacing(10)
+
+        self.doubao_ak_edit = QLineEdit()
+        self.doubao_ak_edit.setEchoMode(QLineEdit.Password)
+        self.doubao_ak_edit.setPlaceholderText("请输入豆包 Access Key")
+        self.doubao_ak_edit.setMinimumWidth(200)
+        doubao_layout.addRow("Access Key:", self.doubao_ak_edit)
+
+        self.doubao_sk_edit = QLineEdit()
+        self.doubao_sk_edit.setEchoMode(QLineEdit.Password)
+        self.doubao_sk_edit.setPlaceholderText("请输入豆包 Secret Key")
+        self.doubao_sk_edit.setMinimumWidth(200)
+        doubao_layout.addRow("Secret Key:", self.doubao_sk_edit)
+
+        self.doubao_endpoint_edit = QLineEdit()
+        self.doubao_endpoint_edit.setPlaceholderText("请输入豆包 Endpoint ID")
+        self.doubao_endpoint_edit.setMinimumWidth(200)
+        doubao_layout.addRow("Endpoint ID:", self.doubao_endpoint_edit)
+
+        layout.addWidget(doubao_group)
+
+        # 按钮布局
+        button_layout = QHBoxLayout()
+        button_layout.setSpacing(10)
+        button_layout.setContentsMargins(0, 10, 0, 0)
+
+        self.load_btn = QPushButton("🔄 重新加载")
+        self.load_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #6c757d;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #5a6268;
+            }
+            QPushButton:pressed {
+                background-color: #545b62;
+            }
+        """)
+        self.load_btn.clicked.connect(self.load_config)
+        button_layout.addWidget(self.load_btn)
+
+        button_layout.addStretch()
+
+        self.save_btn = QPushButton("💾 保存配置")
+        self.save_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #28a745;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #218838;
+            }
+            QPushButton:pressed {
+                background-color: #1e7e34;
+            }
+        """)
+        self.save_btn.clicked.connect(self.save_config)
+        button_layout.addWidget(self.save_btn)
+
+        self.close_btn = QPushButton("❌ 关闭")
+        self.close_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #dc3545;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #c82333;
+            }
+            QPushButton:pressed {
+                background-color: #bd2130;
+            }
+        """)
+        self.close_btn.clicked.connect(self.accept)
+        button_layout.addWidget(self.close_btn)
+
+        layout.addLayout(button_layout)
+
+    def load_config(self):
+        """从配置文件加载配置"""
+        try:
+            # 加载现有配置
+            config = self.config_manager.load()
+
+            # 填充到界面
+            self.kimi_api_key_edit.setText(config.get("moonshot_api_key", ""))
+            self.doubao_ak_edit.setText(config.get("volcano_access_key", ""))
+            self.doubao_sk_edit.setText(config.get("volcano_secret_key", ""))
+            self.doubao_endpoint_edit.setText(config.get("ark_endpoint_id", ""))
+
+        except Exception as e:
+            QMessageBox.warning(self, "加载失败", f"加载配置时出错: {str(e)}")
+
+    def save_config(self):
+        """保存配置到文件"""
+        try:
+            # 获取界面中的值
+            kimi_key = self.kimi_api_key_edit.text().strip()
+            doubao_ak = self.doubao_ak_edit.text().strip()
+            doubao_sk = self.doubao_sk_edit.text().strip()
+            doubao_endpoint = self.doubao_endpoint_edit.text().strip()
+
+            # 检查是否有任何值需要保存
+            if not any([kimi_key, doubao_ak, doubao_sk, doubao_endpoint]):
+                QMessageBox.information(self, "提示", "没有配置需要保存")
+                return
+
+            # 保存配置
+            self.config_manager.save(
+                moonshot_api_key=kimi_key if kimi_key else None,
+                volcano_access_key=doubao_ak if doubao_ak else None,
+                volcano_secret_key=doubao_sk if doubao_sk else None,
+                ark_endpoint_id=doubao_endpoint if doubao_endpoint else None
+            )
+
+            QMessageBox.information(self, "成功", "配置已保存")
+
+        except Exception as e:
+            QMessageBox.critical(self, "保存失败", f"保存配置时出错: {str(e)}")
+
+
+# 配置类型定义
+class ConfigDict(TypedDict, total=False):
+    moonshot_api_key: str
+    volcano_access_key: str
+    volcano_secret_key: str
+    ark_endpoint_id: str
+
+
+class ConfigManager:
+    """
+    配置管理器，用于读写配置文件
+    """
+    _DEFAULT_DIR = os.path.abspath("./config")
+    _DEFAULT_PATH = os.path.join(_DEFAULT_DIR, "token.json")
+
+    def __init__(self, path: Optional[str] = None):
+        """
+        初始化配置管理器
+        :param path: 配置文件路径，默认为 ./config/token.json
+        """
+        self._path = path or self._DEFAULT_PATH
+        self._dir = os.path.dirname(self._path)
+        os.makedirs(self._dir, exist_ok=True)
+
+    def save(
+            self,
+            *,
+            moonshot_api_key: Optional[str] = None,
+            volcano_access_key: Optional[str] = None,
+            volcano_secret_key: Optional[str] = None,
+            ark_endpoint_id: Optional[str] = None,
+            ensure_ascii: bool = False,
+            indent: int = 2
+    ) -> None:
+        """
+        持久化保存配置（按需更新提供的字段）
+        :param moonshot_api_key: Kimi API Key
+        :param volcano_access_key: 豆包 AccessKey
+        :param volcano_secret_key: 豆包 SecretKey
+        :param ark_endpoint_id: 豆包 Endpoint ID
+        :param ensure_ascii: JSON 是否转义非 ASCII
+        :param indent: JSON 缩进空格数
+        :raises RuntimeError: 读写失败时抛出
+        :raises ValueError: 未提供任何字段时抛出
+        """
+        updates = {
+            "moonshot_api_key": moonshot_api_key,
+            "volcano_access_key": volcano_access_key,
+            "volcano_secret_key": volcano_secret_key,
+            "ark_endpoint_id": ark_endpoint_id,
+        }
+
+        if not any(v is not None for v in updates.values()):
+            raise ValueError("至少需要提供一个非 None 的配置项")
+
+        # 读取现有配置
+        data = self._load_existing_config()
+
+        # 更新配置
+        updated = False
+        for key, value in updates.items():
+            if value is not None:
+                data[key] = value
+                updated = True
+
+        if not updated:
+            raise ValueError("未检测到需要更新的字段")
+
+        self._write_config(data, ensure_ascii, indent)
+
+    def _load_existing_config(self) -> Dict[str, Any]:
+        """加载现有配置"""
+        if not os.path.exists(self._path):
+            return {}
+
+        try:
+            with open(self._path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            raise RuntimeError(f"读取配置文件失败: {e}")
+
+    def _write_config(self, data: Dict[str, Any], ensure_ascii: bool, indent: int) -> None:
+        """写入配置到文件"""
+        try:
+            with open(self._path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=ensure_ascii, indent=indent)
+        except OSError as e:
+            raise RuntimeError(f"写入配置文件失败: {e}")
+
+    def load(self) -> Dict[str, str]:
+        """
+        读取全部配置
+        :return: 配置字典
+        :raises RuntimeError: 读取或解析失败时抛出
+        """
+        return self._load_existing_config()
+
+    def get(
+            self,
+            key: str,
+            default: Optional[str] = None,
+            required: bool = False,
+    ) -> Optional[str]:
+        """
+        获取单个配置项
+        :param key: 配置键名
+        :param default: 默认值
+        :param required: 是否为必填项
+        :return: 配置值或默认值
+        :raises ValueError: 必填项缺失时抛出
+        """
+        cfg = self.load()
+        value = cfg.get(key, default)
+
+        if required and value is None:
+            raise ValueError(f"配置项缺失且为必填: {key}")
+
+        return value
+
+    def get_all_keys(self) -> List[str]:
+        """
+        获取当前配置文件中所有键名
+        :return: 键名列表
+        """
+        cfg = self.load()
+        return list(cfg.keys())
+
+    def remove(self, *keys: str, save: bool = True) -> None:
+        """
+        从配置中移除指定键
+        :param keys: 要移除的键名
+        :param save: 是否立即写入文件
+        :raises RuntimeError: 写入失败时抛出
+        """
+        if not keys:
+            return
+
+        cfg = self.load()
+        removed = False
+
+        for key in keys:
+            if key in cfg:
+                del cfg[key]
+                removed = True
+
+        if removed and save:
+            # 创建一个空的更新字典来触发保存
+            update_dict = {key: None for key in keys}
+            self.save(**update_dict)
+
+class ChatBot:
+    """聊天机器人客户端"""
+
+    def __init__(
+            self,
+            provider: str = "kimi",
+            kimi_api_key: Optional[str] = None,
+            doubao_ak: Optional[str] = None,
+            doubao_sk: Optional[str] = None,
+            doubao_endpoint_id: Optional[str] = None,
+            model: str = "moonshot-v1-8k",
+            temperature: float = 0.3,
+            token_json_path: Optional[str] = None,
+    ):
+        """
+        初始化客户端
+        :param provider: 服务提供商 "kimi" | "doubao"
+        :param kimi_api_key: Kimi API Key
+        :param doubao_ak: 豆包 AccessKey
+        :param doubao_sk: 豆包 SecretKey
+        :param doubao_endpoint_id: 豆包 Endpoint ID
+        :param model: 模型名称
+        :param temperature: 温度参数
+        :param token_json_path: 自定义 token.json 路径
+        """
+        self.provider = provider.lower()
+        self.model = model
+        self.temperature = temperature
+        self._client = None
+        self._messages: List[Dict[str, str]] = []
+
+        # 获取配置
+        config = self._get_config(
+            kimi_api_key, doubao_ak, doubao_sk, doubao_endpoint_id, token_json_path
+        )
+
+        # 初始化客户端
+        self._initialize_client(config)
+
+    def _get_config(
+            self,
+            kimi_api_key: Optional[str],
+            doubao_ak: Optional[str],
+            doubao_sk: Optional[str],
+            doubao_endpoint_id: Optional[str],
+            token_json_path: Optional[str],
+    ) -> Dict[str, str]:
+        """获取配置信息"""
+        config = {}
+
+        # 1) 显式参数优先
+        config["moonshot_key"] = self._get_stripped_value(
+            kimi_api_key, "MOONSHOT_API_KEY"
+        )
+        config["ak"] = self._get_stripped_value(doubao_ak, "VOLC_ACCESSKEY")
+        config["sk"] = self._get_stripped_value(doubao_sk, "VOLC_SECRETKEY")
+        config["endpoint_id"] = self._get_stripped_value(
+            doubao_endpoint_id, "ARK_ENDPOINT_ID"
+        )
+
+        # 2) 其次尝试从 token.json
+        token_cfg = self._load_token_config(token_json_path)
+
+        if not config["moonshot_key"]:
+            config["moonshot_key"] = token_cfg.get("moonshot_api_key", "").strip()
+        if not config["ak"]:
+            config["ak"] = token_cfg.get("volcano_access_key", "").strip()
+        if not config["sk"]:
+            config["sk"] = token_cfg.get("volcano_secret_key", "").strip()
+        if not config["endpoint_id"]:
+            config["endpoint_id"] = token_cfg.get("ark_endpoint_id", "").strip()
+
+        return config
+
+    def _get_stripped_value(self, explicit_value: Optional[str], env_var: str) -> str:
+        """获取处理后的值（显式参数 > 环境变量）"""
+        value = explicit_value or os.getenv(env_var, "")
+        return value.strip()
+
+    def _load_token_config(self, token_json_path: Optional[str]) -> Dict[str, str]:
+        """从 token.json 加载配置"""
+        token_path = token_json_path or os.getenv(
+            "TOKEN_JSON_PATH", "./config/token.json"
+        )
+
+        if not os.path.exists(token_path):
+            return {}
+
+        try:
+            cfg_manager = ConfigManager(token_path)
+            return cfg_manager.load()
+        except Exception as e:
+            logger.warning(f"加载 token.json 失败，将忽略该文件: {e}")
+            return {}
+
+    def _initialize_client(self, config: Dict[str, str]) -> None:
+        """初始化客户端"""
+        if self.provider == "kimi":
+            self._initialize_kimi_client(config)
+        elif self.provider == "doubao":
+            self._initialize_doubao_client(config)
+        else:
+            raise ValueError("provider 必须是 'kimi' 或 'doubao'")
+
+    def _initialize_kimi_client(self, config: Dict[str, str]) -> None:
+        """初始化 Kimi 客户端"""
+        moonshot_key = config["moonshot_key"]
+        if not moonshot_key:
+            raise ValueError(
+                "Kimi 需要提供 MOONSHOT_API_KEY（可通过参数、环境变量或 token.json 提供）"
+            )
+
+        self._client = OpenAI(
+            api_key=moonshot_key,
+            base_url="https://api.moonshot.cn/v1"
+        )
+        logger.info("已初始化 Kimi 客户端")
+
+    def _initialize_doubao_client(self, config: Dict[str, str]) -> None:
+        """初始化豆包客户端"""
+        ak, sk, endpoint_id = config["ak"], config["sk"], config["endpoint_id"]
+
+        if not all([ak, sk, endpoint_id]):
+            missing = []
+            if not ak: missing.append("VOLC_ACCESSKEY")
+            if not sk: missing.append("VOLC_SECRETKEY")
+            if not endpoint_id: missing.append("ARK_ENDPOINT_ID")
+            raise ValueError(
+                f"豆包需提供 AK/SK/EndpointID（可通过参数、环境变量或 token.json 提供）: {', '.join(missing)}"
+            )
+
+        # TODO: 实现豆包客户端初始化
+        # self._client = Ark(api_key=sk, region="cn-beijing")
+        self._model = endpoint_id
+        logger.info("已初始化豆包(Ark)客户端")
+
+    def reply(
+            self,
+            message: str,
+            system: Optional[str] = None,
+            use_history: bool = True,
+            stream: bool = False,
+    ) -> str:
+        """
+        发送消息并获取回复
+        :param message: 用户消息
+        :param system: 系统提示词
+        :param use_history: 是否使用历史记录
+        :param stream: 是否使用流式输出
+        :return: 助手回复
+        """
+        # 构建消息列表
+        messages = self._build_messages(message, system, use_history)
+
+        try:
+            if self.provider == "kimi":
+                return self._call_kimi(messages, stream)
+            elif self.provider == "doubao":
+                return self._call_doubao(messages, stream)
+            else:
+                raise ValueError(f"不支持的 provider: {self.provider}")
+        except Exception as e:
+            logger.error(f"调用 {self.provider} API 失败: {e}")
+            raise
+
+    def _build_messages(
+            self, message: str, system: Optional[str], use_history: bool
+    ) -> List[Dict[str, str]]:
+        """构建消息列表"""
+        messages = []
+
+        if system:
+            messages.append({"role": "system", "content": system})
+
+        if use_history:
+            messages.extend(self._messages)
+
+        messages.append({"role": "user", "content": message})
+        return messages
+
+    def _call_kimi(self, messages: List[Dict[str, str]], stream: bool) -> str:
+        """调用 Kimi API"""
+        if not self._client:
+            raise RuntimeError("Kimi 客户端未正确初始化")
+
+        response = self._client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            temperature=self.temperature,
+            stream=stream,
+        )
+
+        if stream:
+            # 处理流式响应
+            full_response = ""
+            for chunk in response:
+                if chunk.choices[0].delta.content:
+                    full_response += chunk.choices[0].delta.content
+            return full_response
+        else:
+            return response.choices[0].message.content
+
+    def _call_doubao(self, messages: List[Dict[str, str]], stream: bool) -> str:
+        """调用豆包 API"""
+        # TODO: 实现豆包 API 调用
+        raise NotImplementedError("豆包 API 调用暂未实现")
+
+    def clear_history(self) -> None:
+        """清空对话历史"""
+        self._messages.clear()
+
+    def get_history(self) -> List[Dict[str, str]]:
+        """获取对话历史"""
+        return self._messages.copy()
 
 
 class WheelTimeEdit(QTimeEdit):
@@ -209,32 +1130,6 @@ class StepTableHelper:
     FIXED_ROW_HEIGHT = 32          # 统一行高（像素）
     ICON_SIZE = 20          # 左侧图标宽/高
     IMG_HEIGHT = 32         # 如果是图片，缩略图高度
-
-    @staticmethod
-    def desc_of(step: dict) -> str:
-        """给每种步骤生成一句精炼描述，用于第1列"""
-        t = step["type"]
-        p = step["params"]
-        # 使用当前时间，只显示时分秒
-        time_str = datetime.now().strftime("%H:%M:%S")
-        if t == "鼠标点击":
-            return f"点击 · {os.path.basename(p.get('image_path', ''))} · {time_str}"
-        if t == "文本输入":
-            txt = p.get("text", "")
-            if txt:
-                return f"键盘 · {txt[:10]}{'…' if len(txt) > 10 else ''} · {time_str}"
-            mode = p.get("mode", "顺序")
-            file = os.path.basename(p.get("excel_path", ""))
-            return f"键盘 · {mode}·{file} · {time_str}"
-        if t == "等待":
-            return f"等待 · {p.get('seconds', 0)}s · {time_str}"
-        if t == "截图":
-            return f"截图 · {os.path.basename(p.get('save_path', ''))} · {time_str}"
-        if t == "鼠标滚轮":
-            return f"滚轮 · {p.get('direction', '向下')}{p.get('clicks', 3)}格 · {time_str}"
-        if t == "拖拽":
-            return f"拖拽 · ({p.get('start_x', 0)},{p.get('start_y', 0)})→({p.get('end_x', 0)},{p.get('end_y', 0)}) · {time_str}"
-        return t
 
     @staticmethod
     def widget_of(step: dict, use_color: bool = True) -> QWidget:
@@ -501,6 +1396,24 @@ font-weight:bold;""")
                         background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #e5e5e5,stop:0.5 #bdbdbd,stop:1 #9e9e9e);
                         border-radius:6px;padding:2px 6px;font-weight:bold;""")
                 icon_label.setText("✋")
+        elif t == "AI 自动回复":
+            provider = p.get("provider", "kimi")
+            content_label.setText(f"{provider}")
+            icon_label.setText("🤖")
+
+            # 设置样式
+            if use_color:
+                content_label.setStyleSheet("""color:#ffffff;
+            background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #a6c0fe,stop:1 #f68084);
+            border-radius:6px;
+            padding:2px 6px;
+            font-weight:bold;""")
+            else:
+                content_label.setStyleSheet("""color:#ffffff;
+            background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #e5e5e5,stop:0.5 #bdbdbd,stop:1 #9e9e9e);
+            border-radius:6px;
+            padding:2px 6px;
+            font-weight:bold;""")
         else:
             content_label.setText(t)
             icon_label.setText("?")
@@ -564,7 +1477,8 @@ font-weight:bold;""")
             "截图": "📸",
             "拖拽": "✋",
             "鼠标滚轮": "🖱️",  # 使用相同图标但可以区分
-            "键盘热键": "⌨️"
+            "键盘热键": "⌨️",
+            "AI 自动回复": "🤖"
         }
 
         icon_text = icons.get(step_type, "❓")  # 默认问号图标
@@ -625,7 +1539,12 @@ font-weight:bold;""")
     background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #d299c2,stop:1 #fef9d7);
     border-radius:6px;
     padding:2px 6px;
-    font-weight:bold;"""
+    font-weight:bold;""",
+                "AI 自动回复": """color:#ffffff;
+            background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #a6c0fe,stop:1 #f68084);
+            border-radius:6px;
+            padding:2px 6px;
+            font-weight:bold;"""  # 添加这一行
             }
 
             # 设置对应样式或默认样式
@@ -1023,6 +1942,8 @@ class TaskRunner(QObject):
                         self.execute_mouse_scroll(params)
                     elif step_type == "键盘热键":
                         self.execute_hotkey(params)
+                    elif step_type == "AI 自动回复":
+                        self.execute_ai_reply(params)
                     else:
                         self.log_message.emit(self.task_name, f"⚠️ 未知步骤类型: {step_type}")
 
@@ -1138,6 +2059,42 @@ class TaskRunner(QObject):
             self.log_message.emit(self.task_name, "✅ 滚轮完成")
         except Exception as e:
             self.log_message.emit(self.task_name, f"❌ 滚轮出错: {str(e)}")
+            raise
+
+    def execute_ai_reply(self, params):
+        try:
+            # 获取剪贴板内容作为消息
+            clipboard_content = pyperclip.paste()
+            if not clipboard_content:
+                self.log_message.emit(self.task_name, "⚠️ 剪贴板为空，无法进行 AI 回复")
+                return
+
+            # 获取参数
+            provider = params.get("provider", "kimi")
+            system_prompt = params.get("system_prompt", "")
+            use_history = params.get("use_history", True)
+            stream = params.get("stream", False)
+
+            # 初始化 ChatBot
+            bot = ChatBot(
+                provider=provider,
+                token_json_path="./config/token.json"
+            )
+
+            # 发送消息并获取回复
+            reply = bot.reply(
+                message=clipboard_content,
+                system=system_prompt,
+                use_history=use_history,
+                stream=stream
+            )
+
+            # 将回复复制到剪贴板
+            pyperclip.copy(reply)
+
+            self.log_message.emit(self.task_name, f"✅ AI 回复成功: {reply}")
+        except Exception as e:
+            self.log_message.emit(self.task_name, f"❌ AI 回复出错: {str(e)}")
             raise
 
     def execute_hotkey(self, params):
@@ -1405,7 +2362,7 @@ class StepConfigDialog(QDialog):
         type_layout = QHBoxLayout()
         type_layout.addWidget(QLabel("步骤类型:"))
         self.type_combo = QComboBox()
-        self.type_combo.addItems(["鼠标点击", "文本输入", "等待", "截图", "拖拽", "鼠标滚轮", '键盘热键'])
+        self.type_combo.addItems(["鼠标点击", "文本输入", "等待", "截图", "拖拽", "鼠标滚轮", "键盘热键", "AI 自动回复"])
         type_layout.addWidget(self.type_combo)
         layout.addLayout(type_layout)
 
@@ -1422,6 +2379,7 @@ class StepConfigDialog(QDialog):
         self.drag_panel = self.create_drag_panel()
         self.scroll_panel = self.create_mouse_scroll_panel()
         self.hot_keyboard_panel = self.create_hot_keyboard_panel()
+        self.ai_reply_panel = self.create_ai_reply_panel()
 
 
         # 添加到堆栈
@@ -1432,6 +2390,7 @@ class StepConfigDialog(QDialog):
         self.params_layout.addWidget(self.drag_panel)
         self.params_layout.addWidget(self.scroll_panel)
         self.params_layout.addWidget(self.hot_keyboard_panel)
+        self.params_layout.addWidget(self.ai_reply_panel)
 
         layout.addWidget(self.params_stack)
 
@@ -1725,7 +2684,106 @@ class StepConfigDialog(QDialog):
 
         return panel
 
+    def create_ai_reply_panel(self):
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
 
+        # AI 提供商选择
+        provider_layout = QHBoxLayout()
+        provider_layout.addWidget(QLabel("AI 提供商:"))
+        self.ai_provider_combo = QComboBox()
+        self.ai_provider_combo.addItems(["kimi", "doubao"])
+        provider_layout.addWidget(self.ai_provider_combo)
+        layout.addLayout(provider_layout)
+
+        # 预设角色选择
+        role_layout = QHBoxLayout()
+        role_layout.addWidget(QLabel("预设角色:"))
+        self.role_combo = QComboBox()
+        self.role_combo.addItems([
+            "自定义",
+            "贴心朋友 ❤️",
+            "幽默损友 😂",
+            "专业助手 🧠",
+            "温柔恋人 💕",
+            "严厉老师 🎓"
+        ])
+        role_layout.addWidget(self.role_combo)
+        layout.addLayout(role_layout)
+
+        # 系统提示词
+        system_prompt_layout = QVBoxLayout()
+        system_prompt_layout.addWidget(QLabel("系统提示词:"))
+        self.ai_system_prompt_edit = QTextEdit()  # 改名以避免冲突
+        self.ai_system_prompt_edit.setMaximumHeight(150)
+        self.ai_system_prompt_edit.setPlaceholderText(
+            "请输入系统提示词，例如：\n你是我的朋友，微信语音里很随和。用一句口语化的话回应我...")
+        system_prompt_layout.addWidget(self.ai_system_prompt_edit)
+        layout.addLayout(system_prompt_layout)
+
+        # 预设角色提示词
+        self.role_prompts = {
+            "自定义": "",
+            "贴心朋友 ❤️": (
+                "你是关系不错的朋友，语气温暖但不过度热情。先简短共情，再给一个贴心小建议或小问题，"
+                "全程口语化、一句话为主，不提自己是AI，不使用列表。"
+            ),
+            "幽默损友 😂": (
+                "你是损友风格的朋友，聊天轻松搞笑但不冒犯。用一句俏皮话回应，"
+                "可以小小自嘲或反转，像真人发语音那样自然，不暴露身份。"
+            ),
+            "专业助手 🧠": (
+                "你是一位专业的助手，回答问题时要准确、清晰、有条理。"
+                "使用正式但友好的语气，提供有用的信息和建议，避免冗长。"
+            ),
+            "温柔恋人 💕": (
+                "你是我温柔的恋人，说话充满关爱和体贴。"
+                "用甜蜜温馨的话语回应，适当使用表情符号表达情感，让对话充满爱意。"
+            ),
+            "严厉老师 🎓": (
+                "你是一位严格的老师，语气认真且专业。"
+                "回答问题时要指出关键要点，适当纠正错误，给出建设性的建议和指导。"
+            )
+        }
+
+        # 连接角色选择信号
+        self.role_combo.currentTextChanged.connect(self.on_ai_role_changed)
+
+        # 初始化为贴心朋友角色
+        # self.role_combo.setCurrentText("贴心朋友 ❤️")
+        # self.on_ai_role_changed("贴心朋友 ❤️")
+
+        # 历史记录选项
+        history_layout = QHBoxLayout()
+        self.use_history_checkbox = QCheckBox("使用对话历史")
+        self.use_history_checkbox.setChecked(True)
+        history_layout.addWidget(self.use_history_checkbox)
+        layout.addLayout(history_layout)
+
+        # 流式输出选项
+        stream_layout = QHBoxLayout()
+        self.stream_checkbox = QCheckBox("流式输出")
+        self.stream_checkbox.setChecked(False)
+        stream_layout.addWidget(self.stream_checkbox)
+        layout.addLayout(stream_layout)
+
+        return panel
+
+    def on_ai_role_changed(self, role_text):
+        """处理AI角色选择变化"""
+        # 检查控件是否仍然存在
+        if not hasattr(self, 'ai_system_prompt_edit'):
+            return
+        try:
+            if role_text in self.role_prompts:
+                prompt = self.role_prompts[role_text]
+                self.ai_system_prompt_edit.setPlainText(prompt)
+                # 如果是自定义角色，允许用户编辑
+                self.ai_system_prompt_edit.setReadOnly(role_text != "自定义")
+        except RuntimeError as e:
+            # 控件已被删除，忽略错误
+            print(e)
+            pass
     def generate_love_text(self):
         from datetime import datetime, date, time
         love_dt = self.love_datetime_edit.dateTime().toPython()  # 用户选的时刻
@@ -2132,6 +3190,9 @@ class StepConfigDialog(QDialog):
             self.scroll_panel.show()
         elif step_type == "键盘热键":
             self.hot_keyboard_panel.show()
+        elif step_type == "AI 自动回复":  # 新增
+            self.ai_reply_panel.setVisible(True)
+            # 隐藏其他面板
 
     def load_step_data(self, step_data):
         step_type = step_data.get("type", "")
@@ -2197,7 +3258,19 @@ class StepConfigDialog(QDialog):
             self.hotkey_input.setText(hotkey)
             self._hotkey_value = hotkey
             self.hotkey_delay_spin.setValue(params.get("delay_ms", 100))
-
+        elif step_type == "AI 自动回复":
+            self.ai_provider_combo.setCurrentText(params.get("provider", "kimi"))
+            self.ai_system_prompt_edit.setPlainText(params.get("system_prompt", ""))
+            self.use_history_checkbox.setChecked(params.get("use_history", True))
+            self.stream_checkbox.setChecked(params.get("stream", False))
+            # 设置角色下拉框，如果提示词匹配预设角色
+            current_prompt = params.get("system_prompt", "")
+            for role, prompt in self.role_prompts.items():
+                if current_prompt == prompt:
+                    self.role_combo.setCurrentText(role)
+                    break
+            else:
+                self.role_combo.setCurrentText("自定义")
     def get_step_data(self):
         step_type = self.type_combo.currentText()
         params = {}
@@ -2272,6 +3345,13 @@ class StepConfigDialog(QDialog):
             params = {
                 "hotkey": self._hotkey_value,  # 使用存储的热键值
                 "delay_ms": self.hotkey_delay_spin.value()
+            }
+        elif step_type == "AI 自动回复":
+            params = {
+                "provider": self.ai_provider_combo.currentText(),
+                "system_prompt": self.ai_system_prompt_edit.toPlainText(),
+                "use_history": self.use_history_checkbox.isChecked(),
+                "stream": self.stream_checkbox.isChecked()
             }
         params["step_time"] = datetime.now().strftime("%H:%M:%S")
         print(f"步骤数据: {params}")
@@ -3086,6 +4166,21 @@ class AutomationUI(QMainWindow):
         self.log_text.clear()
         self.log_text.appendPlainText(f"[{time.strftime('%H:%M:%S')}] 日志已清空")
 
+    def show_ai_token_config(self):
+        """显示AI Token配置对话框"""
+        dialog = AITokenConfigDialog(self)
+        dialog.exec()
+
+    # 在主窗口类中添加以下方法
+
+    def show_ai_test(self):
+        """显示 AI 测试对话框"""
+        try:
+            dialog = AITestDialog(self)
+            dialog.exec()
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"无法打开 AI 测试对话框: {str(e)}")
+
     def create_menus(self):
         menu_bar = self.menuBar()
 
@@ -3166,6 +4261,47 @@ class AutomationUI(QMainWindow):
         action = QWidgetAction(settings_menu)
         action.setDefaultWidget(settings_widget)
         settings_menu.addAction(action)
+
+        # === 新增：AI Token 配置菜单项 ===
+        ai_token_action = QAction("🤖 AI Token 配置", self)
+        ai_token_action.triggered.connect(self.show_ai_token_config)
+        settings_menu.addAction(ai_token_action)
+
+        # === 新增：AI 测试菜单项 ===
+        ai_test_action = QAction("🧠 AI 测试", self)
+        ai_test_action.triggered.connect(self.show_ai_test)
+        settings_menu.addAction(ai_test_action)
+        # 为设置菜单添加样式
+        settings_menu.setStyleSheet("""
+              QMenu {
+                  /* 可选：菜单整体背景 */
+                  background: #ffffff;
+                  border: 1px solid #cccccc;
+              }
+
+              QMenu::item {
+                  /* 普通状态下的文字背景 */
+                  background: transparent;
+                  padding: 6px 20px;
+                  color: black;
+              }
+
+              QMenu::item:selected {       /* 鼠标悬停/键盘选中时生效 */
+                  background: #dbeafe;     /* 你想要的 hover 背景色 */
+                  color: #000;
+              }
+
+              QMenu::item:disabled {
+                  color: #999;
+                  background: transparent;
+              }
+
+              QMenu::separator {
+                  height: 1px;
+                  background: #cccccc;
+                  margin: 4px 0px;
+              }
+          """)
 
         # 文件菜单
         file_menu = menu_bar.addMenu("📁 文件")
@@ -4494,6 +5630,9 @@ class AutomationUI(QMainWindow):
                     end_x = new_step_data['params'].get('end_x', 0)
                     end_y = new_step_data['params'].get('end_y', 0)
                     params_text = f"从({start_x},{start_y})到({end_x},{end_y})"
+            elif new_step_data["type"] == "AI 自动回复":
+                params_text = f"AI: {new_step_data['params'].get('ai_name', '')}"
+
             self.steps_table.setItem(selected_row, 2, QTableWidgetItem(params_text))
             self.steps_table.setItem(selected_row, 3, QTableWidgetItem(str(new_step_data.get("delay", 0))))
 
