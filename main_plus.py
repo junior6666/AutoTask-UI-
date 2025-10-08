@@ -17,12 +17,13 @@ from PySide6.QtWidgets import (
     QListWidgetItem, QCheckBox, QMenu, QFrame, QStyle,
     QSplitter, QSizePolicy, QDialog, QDialogButtonBox,
     QGridLayout, QFileDialog, QMessageBox, QDoubleSpinBox,
-    QTextEdit, QPlainTextEdit, QSystemTrayIcon, QScrollArea, QInputDialog, QDateEdit, QDateTimeEdit, QWidgetAction
+    QTextEdit, QPlainTextEdit, QSystemTrayIcon, QScrollArea, QInputDialog, QDateEdit, QDateTimeEdit, QWidgetAction,
+    QButtonGroup
 )
 from PySide6.QtCore import Qt, QTime, QSize, QSettings, Signal, QObject, QTimer, QPointF, QRectF, QDate, QDateTime, \
     QPoint, QRect, QThread, Slot
 from PySide6.QtGui import QIcon, QAction, QFont, QPalette, QColor, QLinearGradient, QTextCursor, QKeySequence, QPixmap, \
-    QBrush, QPainterPath, QPainter, QPen, QMouseEvent, QIntValidator
+    QBrush, QPainterPath, QPainter, QPen, QMouseEvent, QIntValidator, QCursor
 
 from pathlib import Path
 
@@ -51,9 +52,187 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# 在 main_plus.py 文件中添加以下代码
+# 在 main_plus.py 中添加以下类
+class CoordinatePickerOverlay(QDialog):
+    """
+    坐标拾取覆盖层，用于获取鼠标位置坐标
+    """
+    coordinate_selected = Signal(tuple)  # 发送选中的坐标 (x, y)
 
-# 替换 AITestDialog 类为以下代码
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(
+            Qt.FramelessWindowHint |
+            Qt.WindowStaysOnTopHint |
+            Qt.Tool
+        )
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)  # 关键：不遮挡鼠标
+        self.setModal(True)
+
+        # 关键修复：设置窗口可接受焦点
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.setFocus()
+
+        # 获取屏幕信息和缩放比例
+        self.screen = QApplication.primaryScreen()
+        self.screen_geometry = self.screen.geometry()
+        self.device_pixel_ratio = self.screen.devicePixelRatio()
+
+        # 调试信息
+        print(f"[DEBUG] 屏幕尺寸: {self.screen_geometry.width()}x{self.screen_geometry.height()}")
+        print(f"[DEBUG] 设备像素比例: {self.device_pixel_ratio}")
+
+        self.setGeometry(self.screen_geometry)
+
+        # 创建坐标显示标签
+        self.coord_label = QLabel(self)
+        self.coord_label.setStyleSheet("""
+            background-color: rgba(0, 0, 0, 200);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-family: Consolas, monospace;
+            font-size: 13px;
+            border: 2px solid rgba(255, 255, 255, 150);
+            font-weight: bold;
+        """)
+        self.coord_label.hide()
+
+        # 创建提示标签
+        self.tip_label = QLabel("按 Enter 确认坐标，按 Esc 取消 | 左键点击也可确认", self)
+        self.tip_label.setStyleSheet("""
+            background-color: rgba(0, 0, 0, 200);
+            color: #FFA500;
+            padding: 10px 16px;
+            border-radius: 6px;
+            font-family: Microsoft YaHei, sans-serif;
+            font-size: 12px;
+            border: 2px solid rgba(255, 165, 0, 150);
+            font-weight: bold;
+        """)
+        self.tip_label.hide()
+
+        # 定时器用于更新坐标显示
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.update_position)
+        self.timer.start(16)  # ~60fps
+
+        # 跟踪鼠标位置
+        self.current_pos = QPoint(0, 0)
+        self.raw_pos = QPoint(0, 0)  # 原始坐标
+
+        # 显示提示信息
+        QTimer.singleShot(100, self.show_tip)
+
+    def get_scaled_coordinates(self, pos):
+        """
+        获取缩放校正后的坐标
+        返回调整后的坐标和原始坐标
+        """
+        raw_x, raw_y = pos.x(), pos.y()
+
+        # 方法1: 使用设备像素比例校正
+        scaled_x = int(raw_x * self.device_pixel_ratio)
+        scaled_y = int(raw_y * self.device_pixel_ratio)
+
+        # 方法2: 备用方法 - 使用屏幕虚拟大小
+        virtual_geometry = self.screen.virtualGeometry()
+        if virtual_geometry.width() != self.screen_geometry.width():
+            scale_factor = virtual_geometry.width() / self.screen_geometry.width()
+            scaled_x = int(raw_x * scale_factor)
+            scaled_y = int(raw_y * scale_factor)
+
+        return (scaled_x, scaled_y), (raw_x, raw_y)
+
+    def update_position(self):
+        """更新鼠标位置显示"""
+        mouse_pos = QCursor.pos()
+        self.raw_pos = mouse_pos
+
+        # 获取校正后的坐标
+        scaled_coords, raw_coords = self.get_scaled_coordinates(mouse_pos)
+        self.current_pos = QPoint(scaled_coords[0], scaled_coords[1])
+
+        # 更新坐标标签文本
+        coord_text = f"坐标: {scaled_coords[0]}, {scaled_coords[1]}"
+        coord_text += f"\n原始: {raw_coords[0]}, {raw_coords[1]}"
+        coord_text += f"\n缩放: {self.device_pixel_ratio:.1f}x"
+
+        self.coord_label.setText(coord_text)
+        self.coord_label.adjustSize()
+
+        # 标签定位（避免超出屏幕边界）
+        label_x = mouse_pos.x() + 25
+        label_y = mouse_pos.y() + 25
+
+        if label_x + self.coord_label.width() > self.screen_geometry.width():
+            label_x = mouse_pos.x() - self.coord_label.width() - 15
+        if label_y + self.coord_label.height() > self.screen_geometry.height():
+            label_y = mouse_pos.y() - self.coord_label.height() - 15
+
+        self.coord_label.move(label_x, label_y)
+        self.coord_label.show()
+
+
+    def show_tip(self):
+        """显示操作提示"""
+        self.tip_label.show()
+        self.tip_label.adjustSize()
+
+        # 将提示标签定位在屏幕中央底部
+        tip_x = (self.screen_geometry.width() - self.tip_label.width()) // 2
+        tip_y = self.screen_geometry.height() - 100
+        self.tip_label.move(tip_x, tip_y)
+
+
+    def showEvent(self, event):
+        """窗口显示时自动获取焦点"""
+        super().showEvent(event)
+        self.setFocus()
+        self.activateWindow()
+        # 确保窗口在最前面
+        self.raise_()
+        self.timer.start(16)
+
+    def hideEvent(self, event):
+        """窗口隐藏时停止定时器"""
+        super().hideEvent(event)
+        self.timer.stop()
+
+    def keyPressEvent(self, event):
+        """键盘事件处理"""
+        if event.key() in (Qt.Key_Enter, Qt.Key_Return):
+            print(f"[DEBUG] 确认坐标 - 原始: ({self.raw_pos.x()}, {self.raw_pos.y()}), "
+                  f"校正: ({self.current_pos.x()}, {self.current_pos.y()})")
+            self.coordinate_selected.emit((self.current_pos.x(), self.current_pos.y()))
+            self.accept()
+        elif event.key() == Qt.Key_Escape:
+            self.reject()
+        elif event.key() == Qt.Key_Space:
+            # 空格键切换放大镜显示
+            self.magnifier.setVisible(not self.magnifier.isVisible())
+        else:
+            super().keyPressEvent(event)
+
+    def exec_(self):
+        """重写exec_方法确保焦点正确设置"""
+        self.setFocus()
+        self.activateWindow()
+        self.raise_()
+        return super().exec_()
+
+    def mousePressEvent(self, event):
+        """鼠标点击时也确认坐标"""
+        if event.button() == Qt.LeftButton:
+            print(f"[DEBUG] 鼠标确认坐标 - 原始: ({self.raw_pos.x()}, {self.raw_pos.y()}), "
+                  f"校正: ({self.current_pos.x()}, {self.current_pos.y()})")
+            self.coordinate_selected.emit((self.current_pos.x(), self.current_pos.y()))
+            self.accept()
+        else:
+            super().mousePressEvent(event)
+
+
 
 class AITestDialog(QDialog):
     """AI 测试对话框，支持 Kimi 和豆包"""
@@ -1208,14 +1387,30 @@ font-weight:bold;""")
 
         # 根据类型生成内容
         if t == "鼠标点击":
-            img_path = p.get("image_path", "")
-            click_type = p.get("click_type", "")
-            if os.path.isfile(img_path):
-                pm = QPixmap(img_path).scaledToHeight(StepTableHelper.IMG_HEIGHT, Qt.SmoothTransformation)
-                icon_label.setPixmap(pm)
+            use_image = p.get("use_image", True)
+            use_coordinates = p.get("use_coordinates", False)
+
+            if use_image:
+                img_path = p.get("image_path", "")
+                click_type = p.get("click_type", "左键单击")
+                if os.path.isfile(img_path):
+                    pm = QPixmap(img_path).scaledToHeight(StepTableHelper.IMG_HEIGHT, Qt.SmoothTransformation)
+                    icon_label.setPixmap(pm)
+                else:
+                    icon_label.setText("🖼️")
+                content_label.setText(f"{click_type}\n图片模式")
+
+            elif use_coordinates:
+                x_coord = p.get("x_coordinate", 0)
+                y_coord = p.get("y_coordinate", 0)
+                click_type = p.get("click_type", "左键单击")
+                icon_label.setText("📍")
+                content_label.setText(f"{click_type}\n坐标({x_coord},{y_coord})")
+
             else:
-                icon_label.setText("🖱️")
-            content_label.setText(click_type)
+                icon_label.setText("❓")
+                content_label.setText("未设置模式")
+            click_type = p.get("click_type", "左键单击")
             # 为不同点击类型设置不同的低饱和度渐变背景
             if use_color:
                 if click_type == "左键单击":
@@ -1788,14 +1983,89 @@ class TaskRunner(QObject):
         self.max_repeat = count
 
     def execute_mouse_click(self, params):
-        image_path = params.get("image_path", "")
+        """
+        执行鼠标点击操作
+        支持图片识别点击和坐标直接点击两种模式
+        """
+        use_image = params.get("use_image", True)
+        use_coordinates = params.get("use_coordinates", False)
+
+        # 检查参数有效性
+        if use_image and use_coordinates:
+            if self.auto_skip_image_timeout:
+                self.log_message.emit(self.task_name, "⚠️ 图片和坐标模式不能同时启用，跳过此步骤")
+                return
+            else:
+                raise ValueError("图片和坐标模式不能同时启用")
+
+        if not use_image and not use_coordinates:
+            if self.auto_skip_image_timeout:
+                self.log_message.emit(self.task_name, "⚠️ 未启用图片模式也未启用坐标模式，跳过此步骤")
+                return
+            else:
+                raise ValueError("必须启用图片模式或坐标模式")
+
+        # 获取通用参数
         click_type = params.get("click_type", "左键单击")
-        scan_direction = params.get("scan_direction", "默认")
         offset_x = params.get("offset_x", 0)
         offset_y = params.get("offset_y", 0)
-        confidence = params.get("confidence", 0.8)
-        timeout = self.timeout
         move_duration = params.get("move_duration", self.default_move_duration)
+
+        # 点击类型映射
+        click_map = {
+            "左键单击": pyautogui.click,
+            "左键双击": pyautogui.doubleClick,
+            "右键单击": pyautogui.rightClick,
+            "中键单击": pyautogui.middleClick,
+        }
+
+        if click_type not in click_map:
+            if self.auto_skip_image_timeout:
+                self.log_message.emit(self.task_name, f"⚠️ 不支持的点击类型: {click_type}，跳过")
+                return
+            else:
+                raise ValueError(f"不支持的 click_type: {click_type}")
+
+        # 模式1: 使用坐标直接点击
+        if use_coordinates:
+            x_coordinate = params.get("x_coordinate", 0)
+            y_coordinate = params.get("y_coordinate", 0)
+
+            if x_coordinate == 0 and y_coordinate == 0:
+                if self.auto_skip_image_timeout:
+                    self.log_message.emit(self.task_name, "⚠️ 坐标不能都为0，跳过此步骤")
+                    return
+                else:
+                    raise ValueError("坐标不能都为0")
+
+            target_x = x_coordinate + offset_x
+            target_y = y_coordinate + offset_y
+
+            self.log_message.emit(self.task_name,
+                                  f"📌 使用坐标模式: ({x_coordinate}, {y_coordinate}) + 偏移({offset_x}, {offset_y}) = 目标({target_x}, {target_y})")
+
+            # 移动鼠标
+            if not self.instant_click:
+                try:
+                    pyautogui.moveTo(target_x, target_y, duration=move_duration)
+                except Exception as e:
+                    if self.auto_skip_image_timeout:
+                        self.log_message.emit(self.task_name, f"⚠️ 鼠标移动失败，跳过: {e}")
+                        return
+                    raise
+            else:
+                pyautogui.moveTo(target_x, target_y, duration=0)  # 瞬移
+
+            # 执行点击
+            click_map[click_type](target_x, target_y)
+            self.log_message.emit(self.task_name, f"✅ 已完成坐标 {click_type} 操作")
+            return
+
+        # 模式2: 使用图片识别点击
+        image_path = params.get("image_path", "")
+        scan_direction = params.get("scan_direction", "默认")
+        confidence = params.get("confidence", 0.8)
+        timeout = params.get("timeout", self.timeout)
 
         if not image_path:
             if self.auto_skip_image_timeout:
@@ -1803,10 +2073,19 @@ class TaskRunner(QObject):
                 return
             else:
                 raise ValueError("image_path 不能为空")
-        print(f"[DEBUG] 扫描方向: {scan_direction}")
-        print(f"[DEBUG] 开始定位图片: {image_path}")
+
+        if not os.path.exists(image_path):
+            if self.auto_skip_image_timeout:
+                self.log_message.emit(self.task_name, f"⚠️ 图片文件不存在: {image_path}，跳过此步骤")
+                return
+            else:
+                raise FileNotFoundError(f"图片文件不存在: {image_path}")
+
+        self.log_message.emit(self.task_name, f"🔍 开始定位图片: {os.path.basename(image_path)}")
+        self.log_message.emit(self.task_name, f"📊 扫描方向: {scan_direction}, 置信度: {confidence}, 超时: {timeout}s")
 
         def find_image_center():
+            """默认查找图片中心"""
             start = time.time()
             while True:
                 pos = pyautogui.locateCenterOnScreen(image_path, confidence=confidence)
@@ -1847,17 +2126,22 @@ class TaskRunner(QObject):
                 if time.time() - start > timeout:
                     return None
                 time.sleep(0.2)
+
+        # 执行图片查找
         if scan_direction == "默认":
             center = find_image_center()
         else:
             center = find_image_center_with_direction()
+
         if center is None:
             if self.auto_skip_image_timeout:
-                self.log_message.emit(self.task_name, f"⚠️ 在 {timeout}s 内未找到图片: {os.path.basename(image_path)}，自动跳过")
+                self.log_message.emit(self.task_name,
+                                      f"⚠️ 在 {timeout}s 内未找到图片: {os.path.basename(image_path)}，自动跳过")
                 return  # ✅ 跳过，不抛异常
             else:
                 raise RuntimeError(f"在 {timeout}s 内未找到图片: {image_path}")
 
+        # 计算目标坐标（考虑偏移）
         if scan_direction == "默认":
             target_x = center.x + offset_x
             target_y = center.y + offset_y
@@ -1865,6 +2149,10 @@ class TaskRunner(QObject):
             target_x = center[0] + offset_x
             target_y = center[1] + offset_y
 
+        self.log_message.emit(self.task_name,
+                              f"🎯 找到图片位置: ({center.x if scan_direction == '默认' else center[0]}, {center.y if scan_direction == '默认' else center[1]}) + 偏移({offset_x}, {offset_y}) = 目标({target_x}, {target_y})")
+
+        # 移动鼠标
         if not self.instant_click:
             try:
                 pyautogui.moveTo(target_x, target_y, duration=move_duration)
@@ -1876,21 +2164,9 @@ class TaskRunner(QObject):
         else:
             pyautogui.moveTo(target_x, target_y, duration=0)  # 瞬移
 
-        click_map = {
-            "左键单击": pyautogui.click,
-            "左键双击": pyautogui.doubleClick,
-            "右键单击": pyautogui.rightClick,
-            "中键单击": pyautogui.middleClick,
-        }
-        if click_type not in click_map:
-            if self.auto_skip_image_timeout:
-                self.log_message.emit(self.task_name, f"⚠️ 不支持的点击类型: {click_type}，跳过")
-                return
-            else:
-                raise ValueError(f"不支持的 click_type: {click_type}")
-
+        # 执行点击
         click_map[click_type](target_x, target_y)
-        print(f"[DEBUG] 已完成 {click_type} 操作")
+        self.log_message.emit(self.task_name, f"✅ 已完成图片 {click_type} 操作")
     def run(self):
         self.is_running = True
         self.current_step = 0
@@ -1920,14 +2196,41 @@ class TaskRunner(QObject):
 
                     # 简化日志显示
                     if step_type == "鼠标点击":
-                        image_name = os.path.basename(params.get("image_path", ""))
-                        click_type = params.get("click_type", "左键单击")
+                        use_image = params.get("use_image", True)
+                        use_coordinates = params.get("use_coordinates", False)
+
                         self.log_message.emit(self.task_name, f"📝 执行步骤 {i + 1}/{total_steps}: {step_type}")
-                        self.log_message.emit(self.task_name, f"🖼️ 图片: {image_name}, 点击类型: {click_type}")
+
+                        if use_image:
+                            image_name = os.path.basename(params.get("image_path", "")) if params.get(
+                                "image_path") else "未设置"
+                            click_type = params.get("click_type", "左键单击")
+                            scan_direction = params.get("scan_direction", "默认")
+                            offset_x = params.get("offset_x", 0)
+                            offset_y = params.get("offset_y", 0)
+
+                            log_text = f"🖼️ 图片模式: {image_name}, 点击: {click_type}, 方向: {scan_direction}"
+                            if offset_x != 0 or offset_y != 0:
+                                log_text += f", 偏移: ({offset_x}, {offset_y})"
+                            self.log_message.emit(self.task_name, log_text)
+
+                        elif use_coordinates:
+                            x_coord = params.get("x_coordinate", 0)
+                            y_coord = params.get("y_coordinate", 0)
+                            click_type = params.get("click_type", "左键单击")
+                            offset_x = params.get("offset_x", 0)
+                            offset_y = params.get("offset_y", 0)
+
+                            log_text = f"📍 坐标模式: ({x_coord}, {y_coord}), 点击: {click_type}"
+                            if offset_x != 0 or offset_y != 0:
+                                log_text += f", 偏移: ({offset_x}, {offset_y})"
+                            self.log_message.emit(self.task_name, log_text)
+
+                        else:
+                            self.log_message.emit(self.task_name, "⚠️ 未启用图片或坐标模式")
                     else:
                         self.log_message.emit(self.task_name, f"📝 执行步骤 {i + 1}/{total_steps}: {step_type}")
                         self.log_message.emit(self.task_name, f"⚙️ 参数: {json.dumps(params, ensure_ascii=False)}")
-
                     if step_type == "鼠标点击":
                         self.execute_mouse_click(params)
                     elif step_type == "文本输入":
@@ -2630,59 +2933,157 @@ class StepConfigDialog(QDialog):
         layout = QGridLayout(panel)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        # 图片路径
-        layout.addWidget(QLabel("图片路径:"), 0, 0)
+        self.dianji_use_image_checkbox = QCheckBox("启用图片")
+        self.dianji_use_image_checkbox.setChecked(True)  # 默认
+        layout.addWidget(self.dianji_use_image_checkbox, 0, 0)
+        layout.addWidget(QLabel("图片路径:"), 0, 1)
         self.image_path_edit = QLineEdit()
-        layout.addWidget(self.image_path_edit, 0, 1)
+        layout.addWidget(self.image_path_edit, 0, 2)
         browse_btn = QPushButton("浏览...")
         browse_btn.clicked.connect(self.browse_image)
-        layout.addWidget(browse_btn, 0, 2)
+        layout.addWidget(browse_btn, 0, 3)
 
         # >>> 新增：一键录制按钮
         record_btn = QPushButton("框选截图")
         record_btn.clicked.connect(self.capture_region)
-        layout.addWidget(record_btn, 0, 3)
+        layout.addWidget(record_btn, 0, 4)
+
+        # 坐标输入行
+        self.use_coordinate_checkbox = QCheckBox("启用坐标")
+        self.use_coordinate_checkbox.setChecked(False)  # 默认
+
+        layout.addWidget(self.use_coordinate_checkbox, 1, 0)
+        layout.addWidget(QLabel("X坐标:"),1,1)
+        self.x_coordinate_spinbox = QSpinBox()
+        self.x_coordinate_spinbox.setRange(0, 100000)
+        self.x_coordinate_spinbox.setValue(0)
+        layout.addWidget(self.x_coordinate_spinbox,1,2)
+
+        layout.addWidget(QLabel("Y坐标:"),1,3)
+        self.y_coordinate_spinbox = QSpinBox()
+        self.y_coordinate_spinbox.setRange(0, 100000)
+        self.y_coordinate_spinbox.setValue(0)
+        layout.addWidget(self.y_coordinate_spinbox,1,4)
+
+        # 创建互斥的按钮组
+        self.mode_group = QButtonGroup(self)
+        self.mode_group.setExclusive(True)  # 设置为互斥模式
+        self.mode_group.addButton(self.dianji_use_image_checkbox)
+        self.mode_group.addButton(self.use_coordinate_checkbox)
+        self.mode_group.buttonToggled.connect(self.on_mode_changed)
+
+        # 坐标拾取按钮
+        self.pick_coordinate_btn = QPushButton("拾取坐标")
+        self.pick_coordinate_btn.clicked.connect(self.start_coordinate_picking)
+        layout.addWidget(self.pick_coordinate_btn,1,5)
 
         # 点击类型和读取方向
-        layout.addWidget(QLabel("点击类型:"), 1, 0)
+        layout.addWidget(QLabel("点击类型:"), 2, 0)
         self.click_type_combo = QComboBox()
         self.click_type_combo.addItems(["左键单击", "左键双击", "右键单击", "中键单击"])
-        layout.addWidget(self.click_type_combo, 1, 1)
+        layout.addWidget(self.click_type_combo, 2, 1)
 
         # 图片读取方向
-        layout.addWidget(QLabel("读取方向:"), 1, 2)
+        layout.addWidget(QLabel("读取方向:"), 2, 2)
         self.scan_direction_combo = QComboBox()
         self.scan_direction_combo.addItems(["默认","从左到右", "从右到左", "从上到下", "从下到上"])
-        layout.addWidget(self.scan_direction_combo, 1, 3)
+        layout.addWidget(self.scan_direction_combo, 2, 3)
 
         # 偏移量
-        layout.addWidget(QLabel("X偏移:"), 2, 0)
+        layout.addWidget(QLabel("X偏移:"), 3, 0)
         self.offset_x_spin = QSpinBox()
         self.offset_x_spin.setRange(-1000, 1000)
-        layout.addWidget(self.offset_x_spin, 2, 1)
+        layout.addWidget(self.offset_x_spin, 3, 1)
 
-        layout.addWidget(QLabel("Y偏移:"), 2, 2)
+        layout.addWidget(QLabel("Y偏移:"), 3, 2)
         self.offset_y_spin = QSpinBox()
         self.offset_y_spin.setRange(-1000, 1000)
-        layout.addWidget(self.offset_y_spin, 2, 3)
+        layout.addWidget(self.offset_y_spin, 3, 3)
 
         # 识别设置
-        layout.addWidget(QLabel("识别精度(0-1):"), 3, 0)
+        layout.addWidget(QLabel("识别精度(0-1):"), 4, 0)
         self.confidence_spin = QDoubleSpinBox()
         self.confidence_spin.setRange(0.5, 1.0)
         self.confidence_spin.setValue(0.8)
         self.confidence_spin.setSingleStep(0.05)
-        layout.addWidget(self.confidence_spin, 3, 1)
+        layout.addWidget(self.confidence_spin, 4, 1)
 
-        layout.addWidget(QLabel("超时时间(秒):"), 3, 2)
+        layout.addWidget(QLabel("超时时间(秒):"), 4, 2)
         self.timeout_spin = QDoubleSpinBox()
         self.timeout_spin.setRange(0.1, 60)
         self.timeout_spin.setSingleStep(0.1)
         self.timeout_spin.setValue(1.0)
         self.timeout_spin.setDecimals(1)
-        layout.addWidget(self.timeout_spin, 3, 3)
+        layout.addWidget(self.timeout_spin, 4, 3)
 
         return panel
+
+    def on_mode_changed(self, button, checked):
+        """模式切换处理"""
+        if checked:
+            self.update_controls_state()
+
+    def update_controls_state(self):
+        """更新控件启用状态"""
+        image_enabled = self.dianji_use_image_checkbox.isChecked()
+        coordinate_enabled = self.use_coordinate_checkbox.isChecked()
+
+        # 更新图片相关控件状态
+        self.image_path_edit.setEnabled(image_enabled)
+
+        # 更新坐标相关控件状态
+        self.x_coordinate_spinbox.setEnabled(coordinate_enabled)
+        self.y_coordinate_spinbox.setEnabled(coordinate_enabled)
+
+    def start_coordinate_picking(self):
+        """
+        开始坐标拾取
+        """
+
+        self.coord_picker = CoordinatePickerOverlay(self)
+        self.coord_picker.coordinate_selected.connect(self.on_coordinate_selected)
+        self.coord_picker.finished.connect(self.on_coordinate_picking_finished)
+        # 创建并显示坐标拾取覆盖层
+        parent = self.parent()
+        parent.showMinimized()
+        self.coord_picker.show()
+        self.coord_picker.raise_()
+        self.coord_picker.activateWindow()
+
+    def on_coordinate_selected(self, coordinate):
+        """
+        坐标选择完成的回调
+        """
+        x, y = coordinate
+        self.x_coordinate_spinbox.setValue(x)
+        self.y_coordinate_spinbox.setValue(y)
+
+        # 如果当前是使用坐标模式，更新预览
+        if not self.dianji_use_image_checkbox.isChecked():
+            self.update_mouse_click_preview()
+        parent = self.parent()
+        parent.showMinimized()
+
+    def on_coordinate_picking_finished(self):
+        """
+        坐标拾取完成后的处理
+        """
+        # 清理引用
+        self.coord_picker.deleteLater()
+        self.coord_picker = None
+
+        # 显示主窗口
+        parent = self.parent()
+        parent.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def update_mouse_click_preview(self):
+        """
+        更新鼠标点击预览
+        """
+        # 这里可以添加预览逻辑，如果需要的话
+        pass
 
     def create_ai_reply_panel(self):
         panel = QWidget()
@@ -3204,6 +3605,9 @@ class StepConfigDialog(QDialog):
         # 设置参数
         params = step_data.get("params", {})
         if step_type == "鼠标点击":
+            self.dianji_use_image_checkbox.setChecked(params.get("use_image", True))
+            self.use_coordinate_checkbox.setChecked(params.get("use_coordinates", False))
+
             self.image_path_edit.setText(params.get("image_path", ""))
             self.click_type_combo.setCurrentText(params.get("click_type", "左键单击"))
             self.scan_direction_combo.setCurrentText(params.get("scan_direction", "默认"))
@@ -3211,6 +3615,9 @@ class StepConfigDialog(QDialog):
             self.offset_y_spin.setValue(params.get("offset_y", 0))
             self.confidence_spin.setValue(params.get("confidence", 0.8))
             self.timeout_spin.setValue(params.get("timeout", 10))
+            self.x_coordinate_spinbox.setValue(params.get("x_coordinate", 0))
+            self.y_coordinate_spinbox.setValue(params.get("y_coordinate", 0))
+
         elif step_type == "文本输入":
             self.text_edit.setPlainText(params.get("text", ""))
             self.excel_path_edit.setText(params.get("excel_path", ""))
@@ -3277,13 +3684,17 @@ class StepConfigDialog(QDialog):
 
         if step_type == "鼠标点击":
             params = {
+                "use_image": self.dianji_use_image_checkbox.isChecked(),
                 "image_path": self.image_path_edit.text(),
                 "click_type": self.click_type_combo.currentText(),
                 "scan_direction": self.scan_direction_combo.currentText(),
                 "offset_x": self.offset_x_spin.value(),
                 "offset_y": self.offset_y_spin.value(),
                 "confidence": self.confidence_spin.value(),
-                "timeout": self.timeout_spin.value()
+                "timeout": self.timeout_spin.value(),
+                "use_coordinates": self.use_coordinate_checkbox.isChecked(),
+                "x_coordinate": self.x_coordinate_spinbox.value(),
+                "y_coordinate": self.y_coordinate_spinbox.value()
             }
         elif step_type == "文本输入":
             use_love = self.use_love_checkbox.isChecked()
@@ -4059,9 +4470,10 @@ class AutomationUI(QMainWindow):
                         with open(path, 'r') as f:
                             task_config = json.load(f)
 
-                        task_name = task_config.get("name", "导入的任务")
-                        self.add_task(task_name)
-                        self.tasks[task_name] = task_config
+                        task_name = task_config.get("name", False)
+                        if task_name:
+                            self.add_task(task_name)
+                            self.tasks[task_name] = task_config
 
                         # 选中新导入的任务
                         # 如果是第一个加载的任务，则选中并显示其配置
@@ -4225,11 +4637,11 @@ class AutomationUI(QMainWindow):
         self.move_duration_spinbox = QDoubleSpinBox()
         self.move_duration_spinbox.setRange(0.0, 10.0)
         self.move_duration_spinbox.setSingleStep(0.1)
-        self.move_duration_spinbox.setValue(0.1)
+        self.move_duration_spinbox.setValue(0.3)
         self.move_duration_spinbox.setDecimals(1)
         self.move_duration_spinbox.setSuffix(" 秒")
         self.move_duration_spinbox.setFixedWidth(80)
-        self.move_duration_spinbox.setEnabled(False)  # 默认禁用，由 checkbox 控制
+        self.move_duration_spinbox.setEnabled(True)
 
         # 3. 窗口最小化设置（新增）
         minimize_layout = QHBoxLayout()
@@ -4675,8 +5087,8 @@ class AutomationUI(QMainWindow):
         # 7. 彻底删除旧任务
         del self.tasks[name]
         self.on_log_message(name, f"📝 重命名：{name} → {new_name}")
-    def delete_task(self, name):
 
+    def delete_task(self, name):
         row = -1
         for i in range(self.task_list.count()):
             item = self.task_list.item(i)
@@ -4693,8 +5105,31 @@ class AutomationUI(QMainWindow):
                     self.scheduled_timers[name].stop()
                     del self.scheduled_timers[name]
                 del self.tasks[name]
-            # print(f"已删除任务: {name}")
             self.on_log_message(name, f"🗑️ 已删除任务：{name}")
+
+            # 新增：检查是否删除了最后一个任务
+            if self.task_list.count() == 0:
+                # 清空当前任务的配置显示
+                self.task_name.clear()
+                self.task_status.setText("未选择任务")
+
+                # 重置定时设置
+                self.schedule_enable.setCurrentIndex(0)  # "立即执行"
+                self.schedule_time.setTime(QTime.currentTime())
+                self.repeat_interval.setValue(0)
+                self.repeat_count.setCurrentIndex(0)  # "1次"
+
+                # 清空步骤表格
+                self.steps_table.setRowCount(0)
+
+                # 重置当前任务引用
+                self.current_task = None
+
+                # 重置按钮状态
+                self.start_current_btn.setEnabled(False)
+                self.stop_current_btn.setEnabled(False)
+
+                self.on_log_message("系统", "📋 最后一个任务已删除，配置已重置")
 
     def task_selected(self, current, previous):
         if current:
@@ -4751,7 +5186,37 @@ class AutomationUI(QMainWindow):
         # 格式化参数显示
         params_text = ""
         if step["type"] == "鼠标点击":
-            params_text = f"图片: {os.path.basename(step['params'].get('image_path', ''))},点击类型: {step['params'].get('click_type', '') },方向: {step['params'].get('scan_direction', '默认')}"
+            use_image = step['params'].get('use_image', True)
+            use_coordinates = step['params'].get('use_coordinates', False)
+
+            if use_image:
+                image_path = step['params'].get('image_path', '')
+                image_name = os.path.basename(image_path) if image_path else "未设置"
+                click_type = step['params'].get('click_type', '左键单击')
+                scan_direction = step['params'].get('scan_direction', '默认')
+                offset_x = step['params'].get('offset_x', 0)
+                offset_y = step['params'].get('offset_y', 0)
+                confidence = step['params'].get('confidence', 0.8)
+                timeout = step['params'].get('timeout', 10)
+
+                params_text = f"图片: {image_name}, 点击: {click_type}, 方向: {scan_direction}"
+                if offset_x != 0 or offset_y != 0:
+                    params_text += f", 偏移: ({offset_x}, {offset_y})"
+                params_text += f", 置信度: {confidence}, 超时: {timeout}s"
+
+            elif use_coordinates:
+                x_coord = step['params'].get('x_coordinate', 0)
+                y_coord = step['params'].get('y_coordinate', 0)
+                click_type = step['params'].get('click_type', '左键单击')
+                offset_x = step['params'].get('offset_x', 0)
+                offset_y = step['params'].get('offset_y', 0)
+
+                params_text = f"坐标: ({x_coord}, {y_coord}), 点击: {click_type}"
+                if offset_x != 0 or offset_y != 0:
+                    params_text += f", 偏移: ({offset_x}, {offset_y})"
+
+            else:
+                params_text = "未启用图片或坐标模式"
         elif step["type"] == "文本输入":
             params_text = f"文本: {step['params'].get('text', 'excel表内容')}"
         elif step["type"] == "等待":
@@ -5600,10 +6065,34 @@ class AutomationUI(QMainWindow):
             params_text = ""
             params = new_step_data["params"]
             if new_step_data["type"] == "鼠标点击":
-                img_path = new_step_data['params'].get('image_path', '')
-                click_type = new_step_data['params'].get('click_type', '')
-                img_name = os.path.basename(img_path)  # 去掉目录，只剩文件名
-                params_text = f"图片: {img_name} 点击类型: {click_type} 方向: {new_step_data['params'].get('scan_direction', '默认')}"
+                use_image = params.get('use_image', True)
+                use_coordinates = params.get('use_coordinates', False)
+
+                if use_image:
+                    img_path = params.get('image_path', '')
+                    click_type = params.get('click_type', '左键单击')
+                    scan_direction = params.get('scan_direction', '默认')
+                    offset_x = params.get('offset_x', 0)
+                    offset_y = params.get('offset_y', 0)
+
+                    img_name = os.path.basename(img_path) if img_path else "未设置"
+                    params_text = f"图片: {img_name}, 点击: {click_type}, 方向: {scan_direction}"
+                    if offset_x != 0 or offset_y != 0:
+                        params_text += f", 偏移: ({offset_x}, {offset_y})"
+
+                elif use_coordinates:
+                    x_coord = params.get('x_coordinate', 0)
+                    y_coord = params.get('y_coordinate', 0)
+                    click_type = params.get('click_type', '左键单击')
+                    offset_x = params.get('offset_x', 0)
+                    offset_y = params.get('offset_y', 0)
+
+                    params_text = f"坐标: ({x_coord}, {y_coord}), 点击: {click_type}"
+                    if offset_x != 0 or offset_y != 0:
+                        params_text += f", 偏移: ({offset_x}, {offset_y})"
+
+                else:
+                    params_text = "未启用图片或坐标模式"
             elif new_step_data["type"] == "文本输入":
                 # 优先显示纯文本
                 txt = params.get("text", "")
