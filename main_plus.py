@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QTime, QSize, QSettings, Signal, QObject, QTimer, QPointF, QRectF, QDate, QDateTime, \
     QPoint, QRect, QThread, Slot
 from PySide6.QtGui import QIcon, QAction, QFont, QPalette, QColor, QLinearGradient, QTextCursor, QKeySequence, QPixmap, \
-    QBrush, QPainterPath, QPainter, QPen, QMouseEvent, QIntValidator, QCursor
+    QBrush, QPainterPath, QPainter, QPen, QMouseEvent, QIntValidator, QCursor, QKeyEvent, QFontMetrics, QScreen
 
 from pathlib import Path
 
@@ -1261,49 +1261,393 @@ class HotkeyListener(QThread):
         self.wait()           # 等待线程结束
 
 class RegionCaptureOverlay(QWidget):
-    finished = Signal(QRect)   # 自定义信号，返回选区
+    """
+    区域截图覆盖层，用于选择屏幕区域
+    支持多屏幕、放大镜、网格显示等功能
+    """
+    finished = Signal(QRect)  # 自选区确认信号
+    cancelled = Signal()      # 取消操作信号
 
     def __init__(self):
         super().__init__(None)
-        self.setWindowFlags(Qt.FramelessWindowHint
-                            | Qt.WindowStaysOnTopHint
-                            | Qt.Tool)
+        self.setWindowFlags(Qt.FramelessWindowHint |
+                            Qt.WindowStaysOnTopHint |
+                            Qt.Tool |
+                            Qt.WindowDoesNotAcceptFocus)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setCursor(Qt.CrossCursor)
-        self.setFixedSize(QApplication.primaryScreen().size())
 
+        # 多屏幕支持
+        self.screens = QApplication.screens()
+        self.setGeometry(self._get_combined_screen_geometry())
+
+        # 设置窗口属性
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.setMouseTracking(True)
+        self.setFocus()
+
+        # 选择状态
         self.start_pos = QPoint()
-        self.end_pos   = QPoint()
+        self.end_pos = QPoint()
+        self.is_selecting = False
+        self.current_mouse_pos = QPoint()
 
-    # ---------- 事件 ----------
+        # 放大镜配置
+        self.magnifier_size = 200
+        self.magnification = 3
+        self.show_magnifier = True
+
+        # 网格和参考线
+        self.show_grid = False
+        self.show_crosshair = True
+
+        # 性能优化
+        self.update_timer = QTimer()
+        self.update_timer.setSingleShot(True)
+        self.update_timer.timeout.connect(self.update)
+        self.last_mouse_pos = QPoint()
+
+        # UI配置
+        self.overlay_color = QColor(0, 0, 0, 120)
+        self.selection_color = QColor(255, 0, 0, 180)
+        self.info_bg_color = QColor(0, 0, 0, 200)
+        self.grid_color = QColor(255, 255, 255, 80)
+        self.crosshair_color = QColor(255, 255, 255, 120)
+
+    def _get_combined_screen_geometry(self):
+        """获取所有屏幕的合并几何区域"""
+        combined = QRect()
+        for screen in self.screens:
+            combined = combined.united(screen.geometry())
+        return combined
+
+    def _get_screen_at_point(self, point: QPoint) -> QScreen:
+        """获取指定点所在的屏幕"""
+        for screen in self.screens:
+            if screen.geometry().contains(point):
+                return screen
+        return QApplication.primaryScreen()
+
+    def keyPressEvent(self, event: QKeyEvent):
+        """处理键盘事件"""
+        if event.key() == Qt.Key_Escape:
+            self.cancel_capture()
+        elif event.key() == Qt.Key_Space:
+            # 空格键切换放大镜显示
+            self.show_magnifier = not self.show_magnifier
+            self.update()
+        elif event.key() == Qt.Key_G:
+            # G键切换网格显示
+            self.show_grid = not self.show_grid
+            self.update()
+        elif event.key() == Qt.Key_C:
+            # C键切换十字线显示
+            self.show_crosshair = not self.show_crosshair
+            self.update()
+        elif event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter:
+            # 回车键确认当前选区
+            self.confirm_selection()
+        elif event.key() == Qt.Key_Plus or event.key() == Qt.Key_Equal:
+            # 增加放大倍数
+            self.magnification = min(8, self.magnification + 1)
+            self.update()
+        elif event.key() == Qt.Key_Minus:
+            # 减少放大倍数
+            self.magnification = max(1, self.magnification - 1)
+            self.update()
+        else:
+            super().keyPressEvent(event)
+
     def mousePressEvent(self, event: QMouseEvent):
-        self.start_pos = event.globalPosition().toPoint()
-        self.end_pos   = self.start_pos
+        """鼠标按下事件"""
+        if event.button() == Qt.LeftButton:
+            self.is_selecting = True
+            self.start_pos = event.globalPosition().toPoint()
+            self.end_pos = self.start_pos
+            self.update()
+        elif event.button() == Qt.RightButton:
+            self.cancel_capture()
+        elif event.button() == Qt.MiddleButton:
+            # 中键重置选择
+            self.start_pos = QPoint()
+            self.end_pos = QPoint()
+            self.is_selecting = False
+            self.update()
+        else:
+            super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent):
-        self.end_pos = event.globalPosition().toPoint()
-        self.update()
+        """鼠标移动事件 - 带性能优化"""
+        self.current_mouse_pos = event.globalPosition().toPoint()
+
+        # 性能优化：限制更新频率
+        if (self.current_mouse_pos - self.last_mouse_pos).manhattanLength() > 2:
+            self.last_mouse_pos = self.current_mouse_pos
+
+            if self.is_selecting:
+                self.end_pos = self.current_mouse_pos
+                # 使用定时器延迟更新，避免过于频繁的重绘
+                if not self.update_timer.isActive():
+                    self.update_timer.start(16)  # ~60 FPS
+            elif self.show_magnifier or self.show_crosshair:
+                if not self.update_timer.isActive():
+                    self.update_timer.start(16)
+
+        super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent):
+        """鼠标释放事件"""
+        if event.button() == Qt.LeftButton and self.is_selecting:
+            self.is_selecting = False
+            self.confirm_selection()
+        else:
+            super().mouseReleaseEvent(event)
+
+    def confirm_selection(self):
+        """确认当前选区"""
+        if self.start_pos.isNull() or self.end_pos.isNull():
+            self.cancel_capture()
+            return
+
         rect = QRect(self.start_pos, self.end_pos).normalized()
-        self.finished.emit(rect)
-        # self.close()
-        # print("🖱️ 鼠标释放，发送区域信号并关闭覆盖层")
 
-    # ---------- 绘制 ----------
-    def paintEvent(self, _):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
-        # 半透明背景
-        p.setBrush(QColor(0, 0, 0, 100))
-        p.setPen(Qt.NoPen)
-        p.drawRect(self.rect())
+        # 验证选区有效性
+        if rect.width() >= 5 and rect.height() >= 5:
+            # 确保选区在屏幕范围内
+            screen_geometry = self._get_combined_screen_geometry()
+            rect = rect.intersected(screen_geometry)
 
-        # 红色选框
-        if not self.start_pos.isNull():
-            p.setPen(QPen(Qt.red, 2))
-            p.setBrush(Qt.NoBrush)
-            p.drawRect(QRect(self.start_pos, self.end_pos).normalized())
+            if rect.isValid() and not rect.isEmpty():
+                self.finished.emit(rect)
+                self.close()
+                return
+
+        # 无效选区
+        self.cancel_capture()
+
+    def cancel_capture(self):
+        """取消截图操作"""
+        self.cancelled.emit()
+        self.close()
+
+    def paintEvent(self, event):
+        """绘制事件"""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        # 绘制半透明遮罩
+        painter.setBrush(self.overlay_color)
+        painter.setPen(Qt.NoPen)
+        painter.drawRect(self.rect())
+
+        # 绘制选区
+        if not self.start_pos.isNull() and not self.end_pos.isNull():
+            selected_rect = QRect(self.start_pos, self.end_pos).normalized()
+            self._draw_selection(painter, selected_rect)
+
+        # 绘制十字线（非选择状态下）
+        if self.show_crosshair and not self.is_selecting:
+            self._draw_crosshair(painter, self.current_mouse_pos)
+
+        # 绘制放大镜
+        if self.show_magnifier and not self.current_mouse_pos.isNull():
+            self._draw_magnifier(painter, self.current_mouse_pos)
+
+    def _draw_selection(self, painter: QPainter, rect: QRect):
+        """绘制选区"""
+        # 清除选区部分的遮罩
+        painter.setCompositionMode(QPainter.CompositionMode_Clear)
+        painter.fillRect(rect, Qt.SolidPattern)
+        painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
+
+        # 绘制选区边框
+        pen = QPen(self.selection_color, 2)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRect(rect)
+
+        # 绘制网格
+        if self.show_grid:
+            self._draw_grid(painter, rect)
+
+        # 绘制选区信息
+        self._draw_selection_info(painter, rect)
+
+        # 绘制控制点（用于调整大小）
+        # self._draw_control_points(painter, rect)
+
+    def _draw_grid(self, painter: QPainter, rect: QRect):
+        """在选区内绘制网格"""
+        if rect.width() < 50 or rect.height() < 50:
+            return
+
+        pen = QPen(self.grid_color, 1, Qt.DotLine)
+        painter.setPen(pen)
+
+        # 计算网格间距
+        x_spacing = max(20, rect.width() // 10)
+        y_spacing = max(20, rect.height() // 10)
+
+        # 绘制垂直线
+        for x in range(rect.left() + x_spacing, rect.right(), x_spacing):
+            painter.drawLine(x, rect.top(), x, rect.bottom())
+
+        # 绘制水平线
+        for y in range(rect.top() + y_spacing, rect.bottom(), y_spacing):
+            painter.drawLine(rect.left(), y, rect.right(), y)
+
+    def _draw_crosshair(self, painter: QPainter, pos: QPoint):
+        """绘制十字线"""
+        pen = QPen(self.crosshair_color, 1, Qt.DashLine)
+        painter.setPen(pen)
+
+        # 水平线
+        painter.drawLine(0, pos.y(), self.width(), pos.y())
+        # 垂直线
+        painter.drawLine(pos.x(), 0, pos.x(), self.height())
+
+    def _draw_control_points(self, painter: QPainter, rect: QRect):
+        """绘制选区控制点"""
+        points = [
+            rect.topLeft(), rect.topRight(),
+            rect.bottomLeft(), rect.bottomRight(),
+            QPoint(rect.center().x(), rect.top()),
+            QPoint(rect.center().x(), rect.bottom()),
+            QPoint(rect.left(), rect.center().y()),
+            QPoint(rect.right(), rect.center().y())
+        ]
+
+        painter.setBrush(QColor(255, 255, 255, 200))
+        painter.setPen(QPen(QColor(0, 0, 0, 200), 1))
+
+        for point in points:
+            painter.drawEllipse(point, 3, 3)
+
+    def _draw_selection_info(self, painter: QPainter, rect: QRect):
+        """绘制选区信息"""
+        size_text = f"{rect.width()} × {rect.height()}"
+        pos_text = f"({rect.x()}, {rect.y()})"
+        area_text = f"Area: {rect.width() * rect.height()} px²"
+
+        # 设置字体
+        font = QFont("Arial", 10, QFont.Bold)
+        painter.setFont(font)
+
+        # 计算文本尺寸
+        metrics = QFontMetrics(font)
+        text_width = max(
+            metrics.horizontalAdvance(size_text),
+            metrics.horizontalAdvance(pos_text),
+            metrics.horizontalAdvance(area_text)
+        ) + 20
+
+        text_height = 60
+
+        # 确定信息框位置（避免超出屏幕）
+        info_x = rect.right() + 10
+        info_y = rect.top()
+
+        if info_x + text_width > self.width():
+            info_x = rect.left() - text_width - 10
+        if info_y + text_height > self.height():
+            info_y = rect.bottom() - text_height
+
+        info_rect = QRect(info_x, info_y, text_width, text_height)
+
+        # 绘制背景
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(self.info_bg_color)
+        painter.drawRoundedRect(info_rect, 5, 5)
+
+        # 绘制文本
+        painter.setPen(QPen(Qt.white))
+        text_content = f"{size_text}\n{pos_text}\n{area_text}"
+        painter.drawText(info_rect, Qt.AlignCenter, text_content)
+
+    def _draw_magnifier(self, painter: QPainter, mouse_pos: QPoint):
+        """绘制放大镜效果 - 显示在鼠标右下方，仅放大原始屏幕像素"""
+        screen = self._get_screen_at_point(mouse_pos)
+        if not screen:
+            return
+
+        # 计算放大镜位置（显示在鼠标右下方）
+        magnifier_rect = QRect(0, 0, self.magnifier_size, self.magnifier_size)
+        magnifier_rect.moveTopLeft(QPoint(mouse_pos.x() + 35, mouse_pos.y()+ 35))
+        # 调整位置确保放大镜完全可见
+        if magnifier_rect.right() > self.width():
+            magnifier_rect.moveRight(mouse_pos.x() - 35)
+        if magnifier_rect.bottom() > self.height():
+            magnifier_rect.moveBottom(mouse_pos.y() - 35)
+        if magnifier_rect.left() < 0:
+            magnifier_rect.moveLeft(mouse_pos.x() + 35)
+        if magnifier_rect.top() < 0:
+            magnifier_rect.moveTop(mouse_pos.y() + 35)
+
+        # 计算捕获区域（以鼠标位置为中心）
+        capture_size = self.magnifier_size // self.magnification
+        capture_rect = QRect(0, 0, capture_size, capture_size)
+        capture_rect.moveCenter(mouse_pos)
+
+        # 获取屏幕截图（仅原始屏幕内容，不包括当前绘制的放大镜）
+        try:
+            # 使用窗口ID为0来捕获屏幕，避免捕获到当前窗口
+            screenshot = screen.grabWindow(
+                0,  # 0表示捕获整个屏幕
+                capture_rect.x() - screen.geometry().x(),
+                capture_rect.y() - screen.geometry().y(),
+                capture_rect.width(),
+                capture_rect.height()
+            )
+        except:
+            return
+
+        # 放大绘制
+        magnified = screenshot.scaled(
+            self.magnifier_size,
+            self.magnifier_size,
+            Qt.IgnoreAspectRatio,
+            Qt.SmoothTransformation
+        )
+
+        # 绘制放大镜背景和边框
+        painter.setPen(QPen(QColor(255, 255, 255, 200), 2))
+        painter.setBrush(QColor(0, 0, 0, 220))
+        painter.drawRoundedRect(magnifier_rect, 8, 8)
+
+        # 绘制放大内容
+        painter.drawPixmap(magnifier_rect, magnified)
+
+        # 绘制坐标和放大倍数信息
+        info_text = f"({mouse_pos.x()}, {mouse_pos.y()}) {self.magnification}x"
+        painter.setFont(QFont("Arial", 9))
+        painter.setPen(Qt.white)
+
+        text_rect = QRect(
+            magnifier_rect.left() + 5,
+            magnifier_rect.top() + 5,
+            magnifier_rect.width() - 10,
+            20
+        )
+        painter.drawText(text_rect, Qt.AlignLeft, info_text)
+
+    def showEvent(self, event):
+        """窗口显示事件"""
+        super().showEvent(event)
+        self.setFocus(Qt.ActiveWindowFocusReason)
+        self.grabMouse()
+        self.grabKeyboard()
+
+    def hideEvent(self, event):
+        """窗口隐藏事件"""
+        self.releaseMouse()
+        self.releaseKeyboard()
+        super().hideEvent(event)
+
+    def closeEvent(self, event):
+        """窗口关闭事件"""
+        self.update_timer.stop()
+        super().closeEvent(event)
+
 class StepTableHelper:
     """负责把步骤对象渲染成表格行的工具类，可放到主窗口里复用"""
     FIXED_ROW_HEIGHT = 32          # 统一行高（像素）
@@ -2880,6 +3224,7 @@ class StepConfigDialog(QDialog):
 
     def capture_region(self):
         parent = self.parent()
+        # 将原来的隐藏方法改为最小化
         parent.hide()
         self.hide()
 
@@ -2946,6 +3291,9 @@ class StepConfigDialog(QDialog):
         # >>> 新增：一键录制按钮
         record_btn = QPushButton("框选截图")
         record_btn.clicked.connect(self.capture_region)
+        record_btn.setToolTip(
+            "请先设置鼠标点击的其他设置\n 如偏移 识别精度 最后再进行框选截图 \n这样才会使得其他设置有效\n（ps:这是个使用bug 待修复）")
+        layout.addWidget(record_btn, 0, 4)
         layout.addWidget(record_btn, 0, 4)
 
         # 坐标输入行
@@ -4970,7 +5318,7 @@ class AutomationUI(QMainWindow):
             A: 核心功能实现 2 days 不过一直在断断续续完善UI和修复各种bug 也欢迎大家参与到源码的开发</p>
             <p><b>Q: pyautogui在定位图片位置时，若屏幕中有两个相同的图片，它会选择哪一个图片？？</b><br>
             A: “谁最靠左上角，谁就中标；后面的即使一模一样也不会被理会。”
-如果你想把所有相同图标都找出来，就必须用 locateAllOnScreen()，它会返回一个可迭代对象，里面包含所有匹配区域的坐标盒（left, top, width, height），顺序同样是先上后下、先左后右。（TODO）</p>
+如果你想把所有相同图标都找出来，就必须用 locateAllOnScreen()，它会返回一个可迭代对象，里面包含所有匹配区域的坐标盒（left, top, width, height），顺序同样是先上后下、先左后右。（已实现）</p>
         """)
 
         layout.addWidget(text)
