@@ -2812,7 +2812,7 @@ class TaskRunner(QObject):
         from datetime import datetime, date, time
         # 1. 纯文本优先
         text = params.get("text", "").strip()
-        if not text or '个1314' in text:
+        if not text or '未来也要一起闪耀' in text:
             # 2. 动态纪念日文案
             love_str = params.get("love_date")
             if love_str:
